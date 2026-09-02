@@ -18,13 +18,16 @@
   color: var(--text-muted);
   transition: color var(--transition-fast);
 }
-.back-link:hover, .scan-ref-link:hover { color: var(--text-secondary); }
+.back-link:hover, .scan-ref-link:hover { color: var(--accent-primary); }
 
 .finding-header-card {
   display: flex;
   flex-direction: column;
   gap: var(--space-lg);
   padding: var(--space-2xl);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
 }
 
 .finding-header-top {
@@ -63,7 +66,7 @@
   text-transform: capitalize;
   color: var(--text-muted);
 }
-.status-pill-lg.pill-confirmed { color: var(--text-secondary); }
+.status-pill-lg.pill-confirmed { color: var(--accent-primary); }
 
 .finding-actions {
   display: flex;
@@ -107,6 +110,9 @@
   flex-direction: column;
   gap: var(--space-md);
   padding: var(--space-xl);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
 }
 
 .section-head {
@@ -115,7 +121,7 @@
   gap: var(--space-md);
   padding-bottom: var(--space-sm);
   border-bottom: 1px solid var(--border-subtle);
-  color: var(--text-muted);
+  color: var(--accent-primary);
 }
 
 .detail-text { color: var(--text-secondary); line-height: 1.6; }
@@ -127,7 +133,7 @@
   padding: var(--space-md);
   font-size: 12px;
   line-height: 1.6;
-  color: var(--text-secondary);
+  color: #D6D3D1;
   white-space: pre-wrap;
   word-break: break-all;
 }
@@ -140,6 +146,9 @@
   align-items: flex-start;
   gap: var(--space-lg);
   padding: var(--space-2xl);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
 }
 
 @media (max-width: 1024px) {

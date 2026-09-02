@@ -30,8 +30,8 @@
 .evidence-tab:hover { color: var(--text-secondary); }
 
 .evidence-tab.active {
-  color: var(--text-primary);
-  border-bottom-color: #FFFFFF;
+  color: var(--accent-primary);
+  border-bottom-color: var(--accent-primary);
   background: var(--bg-surface);
 }
 
@@ -39,7 +39,7 @@
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--text-secondary);
+  background: var(--accent-primary);
 }
 
 .evidence-content-box { padding: var(--space-xl); }
@@ -68,7 +68,7 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   padding: var(--space-lg);
-  color: var(--text-secondary);
+  color: #D6D3D1;
   overflow-x: auto;
   font-size: 12px;
   line-height: 1.7;
@@ -99,5 +99,4 @@
   max-height: 500px;
   object-fit: contain;
   border-radius: var(--radius-sm);
-  filter: grayscale(20%);
 }

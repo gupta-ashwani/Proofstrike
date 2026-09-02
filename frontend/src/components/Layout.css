@@ -34,17 +34,18 @@
   text-decoration: none;
 }
 
-/* Logo icon: plain dark box with white icon — no gradient */
+/* Logo icon with muted saffron */
 .brand-logo-icon {
   width: 32px;
   height: 32px;
   border-radius: var(--radius-md);
-  background: #FFFFFF;
+  background: var(--accent-primary);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #000000;
+  color: #FFFFFF;
   flex-shrink: 0;
+  box-shadow: 0 1px 8px var(--accent-primary-glow);
 }
 
 .brand-text {
@@ -105,10 +106,10 @@
 
 .nav-item.active {
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--accent-primary-dim);
 }
 
-/* White left bar — only indicator */
+/* Saffron left bar for active route */
 .nav-item.active::before {
   content: '';
   position: absolute;
@@ -117,7 +118,8 @@
   bottom: 6px;
   width: 2px;
   border-radius: 0 2px 2px 0;
-  background: #FFFFFF;
+  background: var(--accent-primary);
+  box-shadow: 0 0 6px var(--accent-primary);
 }
 
 .nav-icon { flex-shrink: 0; }
@@ -139,8 +141,8 @@
   width: 38px;
   height: 38px;
   border-radius: var(--radius-md);
-  background: #FFFFFF;
-  color: #000000;
+  background: var(--accent-primary);
+  color: #FFFFFF;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -160,10 +162,10 @@
 }
 
 .status-ping {
-  color: var(--text-muted);
+  color: var(--accent-primary);
 }
 
-/* ── Main Area ── */
+/* ── Main Area (Entire Background #111) ── */
 .main-wrapper {
   flex: 1;
   margin-left: var(--sidebar-width);
@@ -171,11 +173,12 @@
   flex-direction: column;
   min-width: 0;
   min-height: 100vh;
+  background-color: var(--bg-deep);
 }
 
 .topbar {
   height: var(--topbar-height);
-  background: var(--bg-base);
+  background: var(--bg-topbar);
   border-bottom: 1px solid var(--border-subtle);
   display: flex;
   align-items: center;

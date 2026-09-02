@@ -15,7 +15,6 @@
   transition: all var(--transition-base);
 }
 
-/* Subtle left accent bar — white at different opacities */
 .stat-card::before {
   content: '';
   position: absolute;
@@ -23,17 +22,17 @@
   left: 0;
   width: 3px;
   height: 100%;
-  background: var(--border-hover);
-  transition: background var(--transition-base);
+  background: rgba(255, 255, 255, 0.08);
+  transition: all var(--transition-base);
 }
 
 .stat-card:hover {
-  border-color: var(--border-hover);
+  border-color: var(--accent-primary-border);
   transform: translateY(-1px);
 }
 
 .stat-card:hover::before {
-  background: var(--border-active);
+  background: var(--accent-primary);
 }
 
 .stat-header {
@@ -44,11 +43,11 @@
 }
 
 .stat-label {
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 11px;
+  font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
 }
 
 .stat-icon-wrapper {
@@ -58,9 +57,9 @@
   width: 32px;
   height: 32px;
   border-radius: var(--radius-md);
-  background: var(--bg-elevated);
-  color: var(--text-secondary);
-  border: 1px solid var(--border-subtle);
+  background: var(--accent-primary-dim);
+  border: 1px solid var(--accent-primary-border);
+  color: var(--accent-primary);
 }
 
 .icon-pulse {
@@ -68,22 +67,20 @@
 }
 
 @keyframes iconPulse {
-  0%   { box-shadow: 0 0 0 0 rgba(255,255,255,0.15); }
-  70%  { box-shadow: 0 0 0 8px rgba(255,255,255,0); }
-  100% { box-shadow: 0 0 0 0 rgba(255,255,255,0); }
+  0%   { box-shadow: 0 0 0 0 rgba(200, 102, 24, 0.25); }
+  70%  { box-shadow: 0 0 0 8px rgba(200, 102, 24, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(200, 102, 24, 0); }
 }
 
-
 .stat-value {
-  font-size: 30px;
+  font-size: 28px;
   font-weight: 700;
   color: var(--text-primary);
   line-height: 1.1;
   margin-bottom: var(--space-xs);
-  letter-spacing: -0.03em;
+  letter-spacing: -0.02em;
   font-family: var(--font-mono);
 }
-
 
 .stat-footer {
   display: flex;

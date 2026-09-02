@@ -20,18 +20,46 @@
   flex-shrink: 0;
 }
 
-/* All badges use same bg/border — only dot shade differs */
-.severity-critical { color: var(--text-primary); border-color: var(--border-hover); }
-.severity-critical .severity-dot { background: #FFFFFF; }
+/* Critical — Muted Rust */
+.severity-critical {
+  color: #EFEFEF;
+  border-color: rgba(200, 64, 16, 0.35);
+  background: rgba(200, 64, 16, 0.08);
+}
+.severity-critical .severity-dot {
+  background: var(--sev-critical);
+  box-shadow: 0 0 5px var(--sev-critical);
+}
 
-.severity-high { color: var(--text-primary); }
-.severity-high .severity-dot { background: #BBBBBB; }
+/* High — Muted Saffron */
+.severity-high {
+  color: #EFEFEF;
+  border-color: rgba(200, 102, 24, 0.35);
+  background: rgba(200, 102, 24, 0.08);
+}
+.severity-high .severity-dot {
+  background: var(--sev-high);
+  box-shadow: 0 0 5px var(--sev-high);
+}
 
-.severity-medium .severity-dot { background: #888888; }
+/* Medium — Antique Gold */
+.severity-medium {
+  border-color: rgba(200, 138, 40, 0.30);
+  background: rgba(200, 138, 40, 0.08);
+}
+.severity-medium .severity-dot {
+  background: var(--sev-medium);
+}
 
-.severity-low .severity-dot { background: #555555; }
+/* Low — Slate */
+.severity-low .severity-dot {
+  background: var(--sev-low);
+}
 
-.severity-info .severity-dot { background: #333333; }
+/* Info — Carbon */
+.severity-info .severity-dot {
+  background: var(--sev-info);
+}
 
 /* Sizes */
 .badge-sm { padding: 2px 7px; font-size: 10px; }

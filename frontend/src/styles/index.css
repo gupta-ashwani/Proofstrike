@@ -1,6 +1,8 @@
 /* ================================================================
    ProofStrike — Design System
-   Monochrome: Black + Grays only. No gradients. No accent colors.
+   Background Canvas: #111111 (Deep Graphite)
+   Surfaces: #171717 (Elevated Carbon)
+   Accent: Muted Warm Saffron / Amber (#C86618 / #DE7E2E)
    ================================================================ */
 
 /* ── Fonts ── */
@@ -8,35 +10,43 @@
 
 /* ── CSS Custom Properties ── */
 :root {
-  /* ── Backgrounds (layered from deepest to most elevated) ── */
-  --bg-deep:     #000000;
-  --bg-base:     #0A0A0A;
-  --bg-surface:  #111111;
-  --bg-elevated: #1A1A1A;
-  --bg-sidebar:  #080808;
+  /* ── Backgrounds ── */
+  --bg-deep:      #111111;
+  --bg-base:      #111111;
+  --bg-surface:   #171717;
+  --bg-elevated:  #1E1E1E;
+  --bg-sidebar:   #0D0D0D;
+  --bg-topbar:    #111111;
+
+  /* ── Primary Accent: Muted Saffron / Amber ── */
+  --accent-primary:        #C86618;
+  --accent-primary-hover:  #DE7E2E;
+  --accent-primary-dim:    rgba(200, 102, 24, 0.10);
+  --accent-primary-border: rgba(200, 102, 24, 0.30);
+  --accent-primary-glow:   rgba(200, 102, 24, 0.16);
 
   /* ── Text ── */
   --text-primary:   #EFEFEF;
   --text-secondary: #A0A0A0;
-  --text-muted:     #555555;
+  --text-muted:     #777777;
   --text-inverse:   #000000;
 
   /* ── Borders ── */
   --border-subtle: rgba(255, 255, 255, 0.06);
-  --border-hover:  rgba(255, 255, 255, 0.18);
-  --border-active: rgba(255, 255, 255, 0.35);
+  --border-hover:  rgba(200, 102, 24, 0.32);
+  --border-active: rgba(200, 102, 24, 0.60);
 
-  /* ── Severity dots (monochrome scale — no colors) ── */
-  --sev-critical: #FFFFFF;
-  --sev-high:     #C0C0C0;
-  --sev-medium:   #888888;
+  /* ── Severity Tokens (warm muted palette) ── */
+  --sev-critical: #C84010;
+  --sev-high:     #C86618;
+  --sev-medium:   #C88A28;
   --sev-low:      #555555;
   --sev-info:     #333333;
 
-  /* ── Status (monochrome, distinguished by shade) ── */
-  --status-active:    #EFEFEF;
+  /* ── Status Tokens ── */
+  --status-active:    #C86618;
   --status-completed: #A0A0A0;
-  --status-failed:    #EFEFEF;
+  --status-failed:    #C84010;
   --status-stopped:   #555555;
   --status-queued:    #666666;
 
@@ -62,9 +72,9 @@
   --radius-full: 9999px;
 
   /* ── Shadows ── */
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.6);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.7);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.8);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.6);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.7);
 
   /* ── Transitions ── */
   --transition-fast: 100ms ease;
@@ -103,13 +113,13 @@ body {
 }
 
 a {
-  color: var(--text-primary);
+  color: var(--accent-primary);
   text-decoration: none;
   transition: color var(--transition-base);
 }
 
 a:hover {
-  color: var(--text-secondary);
+  color: var(--accent-primary-hover);
 }
 
 button {
@@ -134,7 +144,8 @@ input, select, textarea {
 }
 
 input:focus, select:focus, textarea:focus {
-  border-color: var(--border-active);
+  border-color: var(--accent-primary-border);
+  box-shadow: 0 0 0 2px var(--accent-primary-dim);
 }
 
 input::placeholder, textarea::placeholder {
@@ -143,7 +154,7 @@ input::placeholder, textarea::placeholder {
 
 select {
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23555555' viewBox='0 0 16 16'%3E%3Cpath d='M8 12L2 6h12L8 12z'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23777777' viewBox='0 0 16 16'%3E%3Cpath d='M8 12L2 6h12L8 12z'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 12px center;
   padding-right: 32px;
@@ -153,15 +164,15 @@ select {
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: var(--bg-deep); }
 ::-webkit-scrollbar-thumb {
-  background: #222;
+  background: #252525;
   border-radius: var(--radius-full);
 }
-::-webkit-scrollbar-thumb:hover { background: #333; }
+::-webkit-scrollbar-thumb:hover { background: #353535; }
 
 /* ── Typography ── */
-.text-display   { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; }
-.text-heading   { font-size: 19px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.3; }
-.text-subheading{ font-size: 15px; font-weight: 600; line-height: 1.4; }
+.text-display   { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; color: var(--text-primary); }
+.text-heading   { font-size: 19px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.3; color: var(--text-primary); }
+.text-subheading{ font-size: 15px; font-weight: 600; line-height: 1.4; color: var(--text-primary); }
 .text-body      { font-size: 14px; font-weight: 400; line-height: 1.5; }
 .text-caption   { font-size: 12px; font-weight: 500; letter-spacing: 0.02em; line-height: 1.4; }
 .text-mono      { font-family: var(--font-mono); font-size: 13px; }
@@ -184,41 +195,43 @@ select {
 
 .btn:active { transform: scale(0.97); }
 
-/* Primary: solid white bg, black text */
+/* Primary Button: Muted Saffron / Amber */
 .btn-primary {
-  background: #FFFFFF;
-  color: #000000;
-  border: 1px solid #FFFFFF;
+  background: var(--accent-primary);
+  color: #FFFFFF;
+  border: 1px solid var(--accent-primary);
+  box-shadow: 0 1px 6px var(--accent-primary-glow);
 }
 .btn-primary:hover {
-  background: #DDDDDD;
-  border-color: #DDDDDD;
+  background: var(--accent-primary-hover);
+  border-color: var(--accent-primary-hover);
+  transform: translateY(-1px);
 }
 
-/* Secondary: transparent with gray border */
+/* Secondary Button: Subtle Elevated Card */
 .btn-secondary {
-  background: transparent;
+  background: var(--bg-surface);
   color: var(--text-secondary);
   border: 1px solid var(--border-subtle);
 }
 .btn-secondary:hover {
-  border-color: var(--border-hover);
+  border-color: var(--accent-primary-border);
   color: var(--text-primary);
   background: var(--bg-elevated);
 }
 
-/* Danger: dark bg with slightly brighter text */
+/* Danger Button: Subtle Rust */
 .btn-danger {
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  border: 1px solid var(--border-hover);
+  background: var(--bg-surface);
+  color: #E57373;
+  border: 1px solid rgba(229, 115, 115, 0.3);
 }
 .btn-danger:hover {
-  background: #222222;
-  border-color: var(--border-active);
+  background: rgba(229, 115, 115, 0.12);
+  border-color: #E57373;
 }
 
-/* Ghost: no bg, no border */
+/* Ghost Button */
 .btn-ghost {
   background: transparent;
   color: var(--text-secondary);
@@ -361,16 +374,15 @@ tbody tr:last-child td { border-bottom: none; }
 .tab:hover { color: var(--text-secondary); }
 
 .tab.active {
-  color: var(--text-primary);
-  border-bottom-color: #FFFFFF;
+  color: var(--accent-primary);
+  border-bottom-color: var(--accent-primary);
 }
 
 /* ── Animations ── */
-@keyframes fadeIn  { from { opacity: 0; }               to { opacity: 1; } }
+@keyframes fadeIn  { from { opacity: 0; } to { opacity: 1; } }
 @keyframes slideUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes scaleIn { from { opacity: 0; transform: scale(0.96); }     to { opacity: 1; transform: scale(1); } }
 @keyframes spin    { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-@keyframes blink   { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
 
 .animate-slide-up { animation: slideUp var(--transition-slow) ease; }
 .animate-fade-in  { animation: fadeIn  var(--transition-base) ease; }
@@ -380,7 +392,7 @@ tbody tr:last-child td { border-bottom: none; }
   width: 18px;
   height: 18px;
   border: 2px solid var(--border-subtle);
-  border-top-color: var(--text-secondary);
+  border-top-color: var(--accent-primary);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
 }

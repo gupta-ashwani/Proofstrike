@@ -10,7 +10,7 @@
 }
 
 .finding-card:hover {
-  border-color: var(--border-hover);
+  border-color: var(--accent-primary-border);
   transform: translateY(-1px);
 }
 
@@ -42,10 +42,10 @@
   color: var(--text-muted);
 }
 
-.finding-status-tag.status-confirmed { color: var(--text-secondary); }
-.finding-status-tag.status-candidate { color: var(--text-muted); }
+.finding-status-tag.status-confirmed { color: var(--accent-primary); }
+.finding-status-tag.status-candidate { color: var(--sev-medium); }
 .finding-status-tag.status-rejected,
-.finding-status-tag.status-false_positive { color: #333; }
+.finding-status-tag.status-false_positive { color: #555555; }
 
 .finding-title {
   font-size: 14px;
@@ -79,7 +79,7 @@
   gap: 4px;
   font-size: 12px;
   font-weight: 500;
-  color: var(--text-secondary);
+  color: var(--accent-primary);
 }
 
-.finding-link:hover { color: var(--text-primary); }
+.finding-link:hover { color: var(--accent-primary-hover); }

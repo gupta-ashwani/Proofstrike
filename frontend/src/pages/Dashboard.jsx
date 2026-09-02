@@ -7,13 +7,13 @@ import StatsGrid from '../components/StatsGrid';
 import ScanCard from '../components/ScanCard';
 import './Dashboard.css';
 
-// Monochrome grayscale palette for chart — lightest = most severe
+// Muted Saffron & Warm Amber Palette for Chart (Dull, Non-Neon)
 const SEVERITY_COLORS = {
-  critical: '#EFEFEF',
-  high:     '#AAAAAA',
-  medium:   '#707070',
-  low:      '#404040',
-  info:     '#252525',
+  critical: '#C84010',
+  high:     '#C86618',
+  medium:   '#C88A28',
+  low:      '#4A4A4A',
+  info:     '#242424',
 };
 
 export default function Dashboard() {
@@ -128,8 +128,8 @@ export default function Dashboard() {
                   </Pie>
                   <Tooltip
                     contentStyle={{
-                      backgroundColor: '#111111',
-                      borderColor: 'rgba(255,255,255,0.08)',
+                      backgroundColor: '#171717',
+                      borderColor: 'rgba(200, 102, 24, 0.35)',
                       borderRadius: '6px',
                       color: '#EFEFEF',
                       fontSize: '12px',

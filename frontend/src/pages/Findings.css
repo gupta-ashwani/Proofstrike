@@ -9,6 +9,9 @@
   flex-direction: column;
   gap: var(--space-lg);
   padding: var(--space-xl);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
 }
 
 .search-box {
@@ -25,7 +28,7 @@
 
 .search-box input {
   padding-left: 38px;
-  background: var(--bg-deep);
+  background: var(--bg-elevated);
 }
 
 .clear-search {
@@ -48,11 +51,17 @@
 .filter-select {
   width: auto;
   min-width: 160px;
-  background: var(--bg-deep);
+  background: var(--bg-elevated);
   font-size: 13px;
 }
 
-.table-card { padding: 0; overflow: hidden; }
+.table-card {
+  padding: 0;
+  overflow: hidden;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
 
 .type-tag {
   font-size: 10px;
@@ -66,7 +75,7 @@
 }
 
 .finding-table-title { font-weight: 500; color: var(--text-primary); }
-.finding-table-title:hover { color: var(--text-secondary); }
+.finding-table-title:hover { color: var(--accent-primary); }
 
 .status-pill {
   display: inline-flex;
@@ -76,7 +85,7 @@
   text-transform: capitalize;
   color: var(--text-muted);
 }
-.status-pill.pill-confirmed { color: var(--text-secondary); }
+.status-pill.pill-confirmed { color: var(--accent-primary); }
 
 .inspect-btn {
   display: inline-flex;
@@ -84,15 +93,15 @@
   gap: 4px;
   font-size: 12px;
   font-weight: 500;
-  color: var(--text-secondary);
+  color: var(--accent-primary);
   padding: 4px 8px;
   border-radius: var(--radius-sm);
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
+  background: var(--accent-primary-dim);
+  border: 1px solid var(--accent-primary-border);
   transition: all var(--transition-fast);
 }
 .inspect-btn:hover {
-  background: #222222;
-  border-color: var(--border-hover);
-  color: var(--text-primary);
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: #FFFFFF;
 }

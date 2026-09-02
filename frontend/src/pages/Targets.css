@@ -8,10 +8,11 @@
   display: flex;
   align-items: center;
   gap: var(--space-md);
-  border-left: 3px solid var(--text-secondary);
+  border-left: 3px solid var(--accent-primary);
   padding: var(--space-md) var(--space-xl);
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font-size: 14px;
+  background: var(--bg-surface);
 }
 
 .targets-grid {
@@ -26,6 +27,15 @@
   justify-content: space-between;
   gap: var(--space-lg);
   padding: var(--space-xl);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  transition: all var(--transition-base);
+}
+
+.target-card:hover {
+  border-color: var(--accent-primary-border);
+  transform: translateY(-1px);
 }
 
 .target-card-header {
@@ -49,11 +59,11 @@
   align-items: center;
   gap: 5px;
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--accent-primary);
   max-width: 100%;
 }
 .target-url span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.target-url:hover { color: var(--text-secondary); }
+.target-url:hover { color: var(--accent-primary-hover); }
 
 .target-actions {
   display: flex;
@@ -72,12 +82,12 @@
   transition: all var(--transition-fast);
 }
 .btn-icon:hover {
-  color: var(--text-secondary);
+  color: var(--text-primary);
   background: var(--bg-elevated);
 }
 .btn-icon-danger:hover {
-  color: var(--text-primary);
-  background: #222222;
+  color: #E57373;
+  background: rgba(229, 115, 115, 0.12);
 }
 
 .target-card-meta {
@@ -97,9 +107,9 @@
   border-radius: var(--radius-full);
 }
 .auth-pill.active {
-  background: rgba(255,255,255,0.06);
-  color: var(--text-secondary);
-  border: 1px solid var(--border-hover);
+  background: var(--accent-primary-dim);
+  color: var(--accent-primary);
+  border: 1px solid var(--accent-primary-border);
 }
 .auth-pill.none {
   background: transparent;
@@ -116,6 +126,7 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  color: var(--text-muted);
 }
 
 .target-form {
@@ -128,10 +139,10 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  color: var(--text-secondary);
+  color: #E57373;
   font-size: 13px;
-  background: var(--bg-elevated);
+  background: rgba(229, 115, 115, 0.1);
   padding: var(--space-sm) var(--space-md);
   border-radius: var(--radius-sm);
-  border: 1px solid var(--border-hover);
+  border: 1px solid rgba(229, 115, 115, 0.25);
 }

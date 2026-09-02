@@ -39,6 +39,8 @@ export default function Layout({ children }) {
     return 'ProofStrike';
   };
 
+  const isDashboard = location.pathname === '/';
+
   return (
     <div className={`app-shell ${collapsed ? 'sidebar-collapsed' : ''} ${mobileOpen ? 'mobile-open' : ''}`}>
       {/* Mobile Backdrop */}

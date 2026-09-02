@@ -15,17 +15,20 @@
   flex-direction: column;
   gap: var(--space-2xl);
   padding: var(--space-3xl);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
 }
 
 .scan-form-error {
   display: flex;
   align-items: center;
   gap: var(--space-md);
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-hover);
+  background: rgba(229, 115, 115, 0.1);
+  border: 1px solid rgba(229, 115, 115, 0.3);
   padding: var(--space-md) var(--space-lg);
   border-radius: var(--radius-sm);
-  color: var(--text-secondary);
+  color: #E57373;
   font-size: 14px;
 }
 
@@ -51,9 +54,9 @@
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-hover);
-  color: var(--text-secondary);
+  background: var(--accent-primary-dim);
+  border: 1px solid var(--accent-primary-border);
+  color: var(--accent-primary);
   font-size: 11px;
   font-weight: 700;
   display: flex;
@@ -86,13 +89,13 @@
 
 .slider-val {
   font-size: 13px;
-  color: var(--text-secondary);
+  color: var(--accent-primary);
   font-weight: 600;
   font-family: var(--font-mono);
 }
 
 .range-input {
-  accent-color: #FFFFFF;
+  accent-color: var(--accent-primary);
   margin-top: var(--space-sm);
   cursor: pointer;
   width: 100%;
@@ -117,8 +120,8 @@
 }
 .detector-item:hover { border-color: var(--border-hover); }
 .detector-item.selected {
-  background: rgba(255,255,255,0.04);
-  border-color: var(--border-hover);
+  background: var(--accent-primary-dim);
+  border-color: var(--accent-primary-border);
 }
 
 .detector-check {
@@ -129,13 +132,13 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #000000;
+  color: #FFFFFF;
   flex-shrink: 0;
   transition: all var(--transition-fast);
 }
 .detector-item.selected .detector-check {
-  background: #FFFFFF;
-  border-color: #FFFFFF;
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
 }
 
 .detector-info { flex: 1; }
