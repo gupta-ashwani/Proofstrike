@@ -1,0 +1,29 @@
+.scans-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+}
+
+.filter-bar {
+  padding: var(--space-md) var(--space-xl);
+}
+
+.filter-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+}
+
+.filter-select {
+  width: auto;
+  min-width: 160px;
+  background: var(--bg-deep);
+  font-size: 13px;
+}
+
+.scans-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}

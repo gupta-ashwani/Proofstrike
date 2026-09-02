@@ -1,0 +1,193 @@
+.scan-details-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+}
+
+.scan-details-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: var(--space-lg);
+  padding: var(--space-2xl);
+}
+
+.header-left { display: flex; flex-direction: column; gap: var(--space-xs); }
+
+.scan-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  margin-bottom: var(--space-xs);
+}
+
+.scan-id-tag { font-size: 12px; color: var(--text-muted); }
+
+.scan-target-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+}
+
+.target-external-link {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.target-external-link:hover { color: var(--text-secondary); }
+
+.scan-timestamps {
+  display: flex;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+}
+
+/* Stepper */
+.stepper-card { padding: var(--space-xl); }
+
+.stepper-title {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: var(--space-lg);
+}
+
+.stepper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+}
+
+.step-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  flex: 1;
+  gap: var(--space-xs);
+}
+
+.step-circle {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  transition: all var(--transition-base);
+  font-family: var(--font-mono);
+}
+
+.step-item.passed .step-circle {
+  background: var(--bg-elevated);
+  border-color: var(--border-hover);
+  color: var(--text-secondary);
+}
+
+.step-item.current .step-circle {
+  background: #FFFFFF;
+  border-color: #FFFFFF;
+  color: #000000;
+  animation: statusPulse 2s infinite ease-in-out;
+}
+
+.step-name {
+  font-size: 11px;
+  text-transform: capitalize;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.step-item.current .step-name { color: var(--text-primary); font-weight: 600; }
+.step-item.passed .step-name  { color: var(--text-muted); }
+
+.step-line {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  width: 100%;
+  height: 1px;
+  background: var(--border-subtle);
+  z-index: 1;
+}
+.step-item.passed .step-line { background: var(--border-hover); }
+
+/* Telemetry */
+.telemetry-bar {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-xl);
+}
+
+.telemetry-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-lg);
+  padding: var(--space-lg) var(--space-xl);
+}
+
+.telemetry-val {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: block;
+  font-family: var(--font-mono);
+}
+
+/* Method badges */
+.method-badge {
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+}
+
+.ep-url { font-size: 12px; color: var(--text-primary); word-break: break-all; }
+
+.auth-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-secondary);
+}
+
+.findings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--space-xl);
+}
+
+.tab-pane { padding: var(--space-xl); }
+.findings-tab-pane { display: flex; flex-direction: column; gap: var(--space-xl); }
+
+.config-pane { padding: var(--space-xl); }
+.mb-md { margin-bottom: var(--space-md); }
+
+.scan-error-card {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-lg);
+  padding: var(--space-2xl);
+}
+
+@media (max-width: 768px) {
+  .telemetry-bar { grid-template-columns: 1fr; }
+}
