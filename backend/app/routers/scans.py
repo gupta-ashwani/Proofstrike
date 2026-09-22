@@ -43,7 +43,7 @@ async def create_scan(
         config=payload.config,
     )
     db.add(scan)
-    await db.flush()
+    await db.commit()
     await db.refresh(scan)
 
     background_tasks.add_task(run_crawler, scan.id, scan.config)
