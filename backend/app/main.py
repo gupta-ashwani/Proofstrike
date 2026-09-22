@@ -14,7 +14,7 @@ from app.database import init_db
 # Import models so Base.metadata knows about all tables
 import app.models  # noqa: F401
 
-from app.routers import targets, scans, findings, dashboard, reports
+from app.routers import targets, scans, findings, dashboard, reports, crawler
 
 
 @asynccontextmanager
@@ -46,6 +46,7 @@ app.include_router(scans.router)
 app.include_router(findings.router)
 app.include_router(dashboard.router)
 app.include_router(reports.router)
+app.include_router(crawler.router)
 
 
 @app.get("/", tags=["Health"])

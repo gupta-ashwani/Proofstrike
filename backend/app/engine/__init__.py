@@ -1,0 +1,3 @@
+"""
+ProofStrike Engine Module.
+"""

@@ -2,7 +2,7 @@
 Scans router — create, list, inspect, and control scan jobs.
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from datetime import datetime, timezone
@@ -19,12 +19,17 @@ from app.schemas.finding import (
     EndpointResponse,
     EndpointListResponse,
 )
+from app.routers.crawler import run_crawler, cancel_crawler
 
 router = APIRouter(prefix="/api/scans", tags=["Scans"])
 
 
 @router.post("", response_model=ScanResponse, status_code=201)
-async def create_scan(payload: ScanCreate, db: AsyncSession = Depends(get_db)):
+async def create_scan(
+    payload: ScanCreate,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db)
+):
     """Start a new scan against a target."""
     # Verify target exists
     result = await db.execute(select(Target).where(Target.id == payload.target_id))
@@ -40,6 +45,8 @@ async def create_scan(payload: ScanCreate, db: AsyncSession = Depends(get_db)):
     db.add(scan)
     await db.flush()
     await db.refresh(scan)
+
+    background_tasks.add_task(run_crawler, scan.id, scan.config)
 
     return ScanResponse(
         id=scan.id,
@@ -216,6 +223,10 @@ async def stop_scan(scan_id: str, db: AsyncSession = Depends(get_db)):
 
     scan.status = ScanStatus.STOPPED.value
     scan.completed_at = datetime.now(timezone.utc)
+    
+    # Cancel crawler if it's currently running
+    cancel_crawler(scan_id)
+    
     await db.flush()
     await db.refresh(scan)
 
