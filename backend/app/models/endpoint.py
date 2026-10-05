@@ -5,11 +5,11 @@ Endpoint model — a discovered route, form, or API call from crawling.
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import String, Boolean, DateTime, ForeignKey
+from sqlalchemy import String, Boolean, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.sqlite import JSON
 
-from app.database import Base
+from app.database import Base, UTCDateTime
 
 
 class Endpoint(Base):
@@ -27,7 +27,7 @@ class Endpoint(Base):
     auth_required: Mapped[bool] = mapped_column(Boolean, default=False)
     source: Mapped[str] = mapped_column(String(50), default="link", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        UTCDateTime(), default=lambda: datetime.now(timezone.utc)
     )
 
     # Relationships

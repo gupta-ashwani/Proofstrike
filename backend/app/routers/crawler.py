@@ -2,59 +2,73 @@
 Crawler router — trigger and monitor crawl jobs for scans.
 """
 
-import asyncio
 import logging
+import threading
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.database import get_db
+from app.database import get_db, make_engine, make_session_factory
 from app.models.scan import Scan, ScanStatus
 from app.models.target import Target
 from app.engine.crawler.engine import CrawlerEngine
+from app.engine.runner import start_in_thread
 
 logger = logging.getLogger("proofstrike.routers.crawler")
 
 router = APIRouter(prefix="/api/scans", tags=["Crawler"])
 
-# Track running crawlers for cancellation
+# Track running crawlers for cancellation (accessed from request handlers and crawler threads)
 _active_crawlers: dict[str, CrawlerEngine] = {}
+_active_lock = threading.Lock()
+
+# Scan states from which a (re-)crawl may be started
+RECRAWLABLE_STATUSES = (
+    ScanStatus.QUEUED.value,
+    ScanStatus.COMPLETED.value,
+    ScanStatus.FAILED.value,
+    ScanStatus.STOPPED.value,
+)
 
 
-async def run_crawler(scan_id: str, config: dict | None = None):
-    """Background task that runs the crawler engine."""
-    max_depth = (config or {}).get("max_depth", 5)
-    max_pages = (config or {}).get("max_pages", 100)
-    headless = (config or {}).get("headless", True)
-
-    engine = CrawlerEngine(
-        scan_id=scan_id,
-        headless=headless,
-        max_depth=max_depth,
-        max_pages=max_pages,
-    )
-    _active_crawlers[scan_id] = engine
-
+async def _run_crawler(engine: CrawlerEngine):
+    """Runs on the crawler's own thread/event loop, so it needs its own DB engine."""
+    db_engine = make_engine()
     try:
-        stats = await engine.run()
-        logger.info("Crawl finished for scan %s: %s", scan_id[:8], stats)
+        stats = await engine.run(make_session_factory(db_engine))
+        logger.info("Crawl finished for scan %s: %s", engine.scan_id[:8], stats)
     except Exception as e:
-        logger.error("Crawl failed for scan %s: %s", scan_id[:8], e)
+        logger.error("Crawl failed for scan %s: %s", engine.scan_id[:8], e, exc_info=True)
     finally:
-        _active_crawlers.pop(scan_id, None)
+        await db_engine.dispose()
+        with _active_lock:
+            _active_crawlers.pop(engine.scan_id, None)
+
+
+def launch_crawler(scan_id: str) -> bool:
+    """
+    Start the crawler for a scan on a background thread.
+
+    Returns False if a crawler is already running for this scan.
+    """
+    with _active_lock:
+        if scan_id in _active_crawlers:
+            return False
+        engine = CrawlerEngine(scan_id=scan_id)
+        _active_crawlers[scan_id] = engine
+
+    start_in_thread(f"crawler-{scan_id[:8]}", lambda: _run_crawler(engine))
+    return True
 
 
 @router.post("/{scan_id}/crawl", status_code=202)
-async def start_crawl(
-    scan_id: str,
-    background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db),
-):
+async def start_crawl(scan_id: str, db: AsyncSession = Depends(get_db)):
     """
-    Trigger the crawler for a scan.
+    Trigger (or re-run) the crawler for a scan.
 
-    The crawler runs as a background task — this endpoint returns immediately.
+    The crawler runs in the background — this endpoint returns immediately.
+    Endpoints from a previous crawl of this scan are replaced.
     Monitor progress via GET /api/scans/{scan_id}/progress.
     """
     # Verify scan exists and is in a valid state
@@ -63,15 +77,12 @@ async def start_crawl(
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
 
-    if scan.status not in (ScanStatus.QUEUED.value, ScanStatus.COMPLETED.value):
+    if scan.status not in RECRAWLABLE_STATUSES:
         raise HTTPException(
             status_code=400,
-            detail=f"Scan is in '{scan.status}' state — can only crawl from 'queued' or 'completed'",
+            detail=f"Scan is in '{scan.status}' state — can only crawl from "
+                   f"{', '.join(repr(s) for s in RECRAWLABLE_STATUSES)}",
         )
-
-    # Check if already running
-    if scan_id in _active_crawlers:
-        raise HTTPException(status_code=409, detail="Crawler already running for this scan")
 
     # Verify target exists
     result = await db.execute(select(Target).where(Target.id == scan.target_id))
@@ -79,8 +90,8 @@ async def start_crawl(
     if not target:
         raise HTTPException(status_code=404, detail="Target not found")
 
-    # Launch crawler in background
-    background_tasks.add_task(run_crawler, scan_id, scan.config)
+    if not launch_crawler(scan_id):
+        raise HTTPException(status_code=409, detail="Crawler already running for this scan")
 
     return {
         "message": "Crawler started",
@@ -91,7 +102,8 @@ async def start_crawl(
 
 
 def cancel_crawler(scan_id: str) -> bool:
-    engine = _active_crawlers.get(scan_id)
+    with _active_lock:
+        engine = _active_crawlers.get(scan_id)
     if engine:
         engine.cancel()
         return True

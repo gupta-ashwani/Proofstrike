@@ -214,7 +214,7 @@ export default function ScanDetails() {
           <Clock size={20} />
           <div>
             <span className="telemetry-val text-mono">
-              {scan.config?.crawl_depth || 3}
+              {scan.stats?.max_depth ?? scan.config?.crawl_depth ?? scan.config?.max_depth ?? 5}
             </span>
             <span className="telemetry-lbl text-caption text-muted">Configured Depth</span>
           </div>

@@ -139,15 +139,14 @@ class AuthHandler:
         indicator_type = indicator.get("type", "url_changed")
         indicator_value = indicator.get("value", "")
 
-        current_url = self.page.url
-
         if indicator_type == "url_contains":
-            # URL should contain a specific substring after login
-            return indicator_value in current_url
+            # URL should contain a specific substring after login.
+            # Wait for it: SPAs often redirect from JS after an async login request.
+            return await self._wait_for_url(lambda url: indicator_value in url)
 
         elif indicator_type == "url_changed":
             # URL should be different from the login page
-            return current_url != pre_login_url
+            return await self._wait_for_url(lambda url: url != pre_login_url)
 
         elif indicator_type == "element_visible":
             # A specific element should be visible after login
@@ -172,4 +171,14 @@ class AuthHandler:
         else:
             # Default: assume success if URL changed
             logger.warning("Unknown success indicator type: %s", indicator_type)
-            return current_url != pre_login_url
+            return await self._wait_for_url(lambda url: url != pre_login_url)
+
+    async def _wait_for_url(self, predicate, timeout: int = 5_000) -> bool:
+        """True once the page URL satisfies predicate (checked immediately, then polled)."""
+        if predicate(self.page.url):
+            return True
+        try:
+            await self.page.wait_for_url(predicate, timeout=timeout)
+            return True
+        except PlaywrightTimeout:
+            return False

@@ -6,19 +6,57 @@ Handles:
   - Extracting links from <a href>, onclick handlers, etc.
   - URL canonicalization to avoid duplicate visits
   - Domain boundary enforcement
+  - Skipping logout / destructive URLs (session-killing or state-changing GETs)
   - Depth and page budget limits
   - Waiting for network idle after each navigation
+  - Re-authenticating when a page bounces to the login screen (via session_guard)
 """
 
 import asyncio
 import logging
+import re
 from collections import deque
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from urllib.parse import urlparse, urljoin, urlunparse, parse_qs, urlencode
 
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeout
 
 logger = logging.getLogger("proofstrike.crawler.spider")
+
+# URL keywords that indicate the link ends the session or changes/destroys data.
+# A keyword must start a path/query segment ("/logout", "?action=delete",
+# "/user-remove"), so words merely containing it ("/undeleted") are not skipped.
+DEFAULT_EXCLUDE_KEYWORDS = [
+    "logout", "log-out", "log_out", "signout", "sign-out", "sign_out", "logoff", "log-off",
+    "delete", "remove", "destroy", "drop", "purge", "truncate", "reset",
+    "unsubscribe", "deactivate", "revoke", "disable",
+]
+DEFAULT_EXCLUDE_PATTERN = (
+    r"(?:^|[/?&=_.\-])(?:" + "|".join(re.escape(k) for k in DEFAULT_EXCLUDE_KEYWORDS) + r")"
+)
+
+
+class UrlExcluder:
+    """
+    Decides whether a URL must never be navigated to by the crawler.
+
+    Matches the default logout/destructive keywords plus any user-supplied
+    regexes (scan config "exclude_patterns") against the URL's path + query.
+    """
+
+    def __init__(self, extra_patterns: list[str] | None = None):
+        self.patterns = [re.compile(DEFAULT_EXCLUDE_PATTERN, re.IGNORECASE)]
+        for pattern in extra_patterns or []:
+            try:
+                self.patterns.append(re.compile(pattern, re.IGNORECASE))
+            except re.error as e:
+                logger.warning("Ignoring invalid exclude pattern %r: %s", pattern, e)
+
+    def is_excluded(self, url: str) -> bool:
+        parsed = urlparse(url)
+        target = parsed.path + ("?" + parsed.query if parsed.query else "")
+        return any(p.search(target) for p in self.patterns)
 
 
 @dataclass
@@ -91,6 +129,11 @@ def is_crawlable_url(url: str) -> bool:
     return True
 
 
+# Called after each navigation with (requested_url, landed_url). Returns True if it
+# restored a lost session, in which case the page is loaded again.
+SessionGuard = Callable[[str, str], Awaitable[bool]]
+
+
 class Spider:
     """
     BFS spider that discovers all navigable pages within a target domain.
@@ -108,12 +151,16 @@ class Spider:
         max_depth: int = 5,
         max_pages: int = 100,
         wait_after_navigation: int = 2_000,
+        excluder: UrlExcluder | None = None,
+        session_guard: SessionGuard | None = None,
     ):
         self.page = page
         self.base_url = base_url.rstrip("/")
         self.max_depth = max_depth
         self.max_pages = max_pages
         self.wait_after_navigation = wait_after_navigation
+        self.excluder = excluder or UrlExcluder()
+        self.session_guard = session_guard
 
         # Parse base domain for boundary checking
         parsed_base = urlparse(self.base_url)
@@ -123,6 +170,7 @@ class Spider:
         self.visited: set[str] = set()
         self.queue: deque[tuple[str, int]] = deque()  # (url, depth)
         self.pages_crawled: int = 0
+        self.excluded_urls: list[str] = []  # canonical URLs skipped as unsafe
 
         # Cancellation flag
         self._cancelled = False
@@ -169,6 +217,10 @@ class Spider:
                     and is_crawlable_url(link)
                 ):
                     self.visited.add(canonical)
+                    if self.excluder.is_excluded(link):
+                        logger.info("Skipping unsafe URL: %s", link)
+                        self.excluded_urls.append(canonical)
+                        continue
                     self.queue.append((link, depth + 1))
 
             yield result
@@ -176,25 +228,33 @@ class Spider:
         if self._cancelled:
             logger.info("Spider cancelled after %d pages", self.pages_crawled)
 
+    async def _navigate(self, url: str, result: CrawlResult):
+        """Load url and wait for it to settle, recording status and final URL."""
+        response = await self.page.goto(url, wait_until="domcontentloaded")
+
+        if response:
+            result.status = response.status
+            result.final_url = self.page.url
+
+        # Wait for any dynamic content to load
+        try:
+            await self.page.wait_for_load_state("networkidle", timeout=self.wait_after_navigation)
+        except PlaywrightTimeout:
+            logger.debug("Network idle timeout for %s — proceeding", url)
+
+        # Small extra wait for SPA rendering
+        await asyncio.sleep(0.5)
+
     async def _visit_page(self, url: str) -> CrawlResult:
         """Navigate to a page and extract all links from it."""
         result = CrawlResult(url=url, final_url=url)
 
         try:
-            response = await self.page.goto(url, wait_until="domcontentloaded")
+            await self._navigate(url, result)
 
-            if response:
-                result.status = response.status
-                result.final_url = self.page.url
-
-            # Wait for any dynamic content to load
-            try:
-                await self.page.wait_for_load_state("networkidle", timeout=self.wait_after_navigation)
-            except PlaywrightTimeout:
-                logger.debug("Network idle timeout for %s — proceeding", url)
-
-            # Small extra wait for SPA rendering
-            await asyncio.sleep(0.5)
+            # Bounced to the login page? Restore the session and load the page again.
+            if self.session_guard and await self.session_guard(url, self.page.url):
+                await self._navigate(url, result)
 
             # Extract page title
             result.title = await self.page.title() or ""

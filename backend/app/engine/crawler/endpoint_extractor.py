@@ -8,7 +8,9 @@ Two extraction sources:
 All discovered endpoints are deduplicated by (url_path, method) pair.
 """
 
+import json
 import logging
+import re
 from dataclasses import dataclass, field
 from urllib.parse import urlparse, parse_qs, urljoin
 
@@ -38,6 +40,64 @@ def _parse_query_params(url: str) -> dict | None:
         # Flatten single-value lists for cleaner storage
         return {k: v[0] if len(v) == 1 else v for k, v in params.items()}
     return None
+
+
+def _parse_post_body(post_data: str) -> dict | None:
+    """
+    Parse a captured request body into a flat param dict.
+
+    JSON object bodies keep their top-level keys (nested values are kept as-is);
+    anything else is treated as URL-encoded form data.
+    """
+    stripped = post_data.strip()
+    if stripped.startswith(("{", "[")):
+        try:
+            body = json.loads(stripped)
+        except ValueError:
+            return None
+        return body if isinstance(body, dict) and body else None
+
+    params = parse_qs(post_data, keep_blank_values=True)
+    return {k: v[0] if len(v) == 1 else v for k, v in params.items()} or None
+
+
+# Param names whose values are credentials or session secrets
+SENSITIVE_PARAM_RE = re.compile(
+    r"pass(word|wd|phrase)?|pwd|secret|token|api[_-]?key|session|credential|otp|^auth(orization|[_-]?(token|key|code))?$",
+    re.IGNORECASE,
+)
+MASK = "********"
+
+
+def mask_sensitive_params(params: dict | None, secret_values: set[str] = frozenset()) -> dict | None:
+    """
+    Return a copy of params with credential values replaced by MASK.
+
+    A value is masked when its name looks sensitive, its form field type is
+    "password", or it equals one of secret_values (e.g. the configured test
+    account password). Form-field descriptors ({"type", "value", ...}) keep
+    their shape; only "value" is masked.
+    """
+    if not params:
+        return params
+
+    def is_secret(value) -> bool:
+        if isinstance(value, list):
+            return any(is_secret(v) for v in value)
+        return isinstance(value, str) and value in secret_values
+
+    masked = {}
+    for name, value in params.items():
+        sensitive_name = bool(SENSITIVE_PARAM_RE.search(str(name)))
+        if isinstance(value, dict) and "type" in value and "value" in value:
+            if value.get("value") and (
+                sensitive_name or value.get("type") == "password" or is_secret(value["value"])
+            ):
+                value = {**value, "value": MASK}
+        elif value not in ("", None) and (sensitive_name or is_secret(value)):
+            value = MASK
+        masked[name] = value
+    return masked
 
 
 def _strip_query(url: str) -> str:
@@ -231,18 +291,8 @@ class EndpointExtractor:
 
             params = _parse_query_params(req.url)
 
-            # Parse POST data as additional params
-            post_params = None
-            if req.post_data:
-                try:
-                    # Try URL-encoded form data
-                    post_params = parse_qs(req.post_data, keep_blank_values=True)
-                    post_params = {
-                        k: v[0] if len(v) == 1 else v
-                        for k, v in post_params.items()
-                    }
-                except Exception:
-                    pass
+            # Parse POST data (JSON or URL-encoded) as additional params
+            post_params = _parse_post_body(req.post_data) if req.post_data else None
 
             # Merge query params and post params
             all_params = {}

@@ -32,7 +32,7 @@ export default function ScanCard({ scan, targetName }) {
           {scan.stats && (
             <span className="scan-meta-item">
               <Compass size={14} />
-              {scan.stats.endpoints_count || 0} endpoints
+              {scan.stats.endpoints_found ?? 0} endpoints
             </span>
           )}
         </div>

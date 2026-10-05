@@ -286,6 +286,8 @@ export default function Targets() {
                 />
                 <span className="form-hint">
                   Crawler engine uses this for automated SPA authenticated session tokens.
+                  {editingTarget?.auth_config &&
+                    ' Saved passwords are shown as ******** — leave them as-is to keep them, or clear the field to remove authentication.'}
                 </span>
               </div>
 

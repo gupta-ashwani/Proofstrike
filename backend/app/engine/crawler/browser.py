@@ -13,7 +13,9 @@ import logging
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
-from playwright.async_api import async_playwright, Browser, BrowserContext, Page, Request
+from playwright.async_api import (
+    async_playwright, APIRequestContext, Browser, BrowserContext, Page, Request,
+)
 
 logger = logging.getLogger("proofstrike.crawler.browser")
 
@@ -134,6 +136,18 @@ class BrowserManager:
         requests = list(self._captured_requests)
         self._captured_requests.clear()
         return requests
+
+    async def new_anonymous_request_context(self) -> APIRequestContext:
+        """
+        Create a cookie-less HTTP client (separate from the crawling session),
+        used to check which endpoints are reachable without logging in.
+        Callers must dispose() it.
+        """
+        if not self._playwright:
+            raise RuntimeError("Browser not launched. Call launch() first.")
+        return await self._playwright.request.new_context(
+            ignore_https_errors=True, timeout=10_000
+        )
 
     async def get_cookies(self) -> list[dict]:
         """Get all cookies from the browser context."""

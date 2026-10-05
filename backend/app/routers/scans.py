@@ -2,7 +2,7 @@
 Scans router — create, list, inspect, and control scan jobs.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from datetime import datetime, timezone
@@ -19,7 +19,7 @@ from app.schemas.finding import (
     EndpointResponse,
     EndpointListResponse,
 )
-from app.routers.crawler import run_crawler, cancel_crawler
+from app.routers.crawler import launch_crawler, cancel_crawler
 
 router = APIRouter(prefix="/api/scans", tags=["Scans"])
 
@@ -27,7 +27,6 @@ router = APIRouter(prefix="/api/scans", tags=["Scans"])
 @router.post("", response_model=ScanResponse, status_code=201)
 async def create_scan(
     payload: ScanCreate,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
     """Start a new scan against a target."""
@@ -46,7 +45,9 @@ async def create_scan(
     await db.commit()
     await db.refresh(scan)
 
-    background_tasks.add_task(run_crawler, scan.id, scan.config)
+    # Launch the crawler on its own background thread (see app.engine.runner).
+    # The scan row is committed above, so the crawler thread can load it.
+    launch_crawler(scan.id)
 
     return ScanResponse(
         id=scan.id,

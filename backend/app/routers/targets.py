@@ -15,6 +15,7 @@ from app.schemas.target import (
     TargetResponse,
     TargetListResponse,
 )
+from app.services.credentials import mask_auth_config, merge_masked_secrets
 
 router = APIRouter(prefix="/api/targets", tags=["Targets"])
 
@@ -38,7 +39,7 @@ async def list_targets(db: AsyncSession = Depends(get_db)):
                 id=t.id,
                 name=t.name,
                 base_url=t.base_url,
-                auth_config=t.auth_config,
+                auth_config=mask_auth_config(t.auth_config),
                 created_at=t.created_at,
                 updated_at=t.updated_at,
                 scan_count=scan_count,
@@ -64,7 +65,7 @@ async def create_target(payload: TargetCreate, db: AsyncSession = Depends(get_db
         id=target.id,
         name=target.name,
         base_url=target.base_url,
-        auth_config=target.auth_config,
+        auth_config=mask_auth_config(target.auth_config),
         created_at=target.created_at,
         updated_at=target.updated_at,
         scan_count=0,
@@ -88,7 +89,7 @@ async def get_target(target_id: str, db: AsyncSession = Depends(get_db)):
         id=target.id,
         name=target.name,
         base_url=target.base_url,
-        auth_config=target.auth_config,
+        auth_config=mask_auth_config(target.auth_config),
         created_at=target.created_at,
         updated_at=target.updated_at,
         scan_count=scan_count,
@@ -109,8 +110,9 @@ async def update_target(
         target.name = payload.name
     if payload.base_url is not None:
         target.base_url = payload.base_url
-    if payload.auth_config is not None:
-        target.auth_config = payload.auth_config
+    # auth_config may be explicitly set to null to remove authentication
+    if "auth_config" in payload.model_fields_set:
+        target.auth_config = merge_masked_secrets(payload.auth_config, target.auth_config)
 
     await db.flush()
     await db.refresh(target)
@@ -124,7 +126,7 @@ async def update_target(
         id=target.id,
         name=target.name,
         base_url=target.base_url,
-        auth_config=target.auth_config,
+        auth_config=mask_auth_config(target.auth_config),
         created_at=target.created_at,
         updated_at=target.updated_at,
         scan_count=scan_count,
