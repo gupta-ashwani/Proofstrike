@@ -13,6 +13,7 @@ from sqlalchemy import select
 
 from app.engine.detect.base import DetectorHttp, EndpointProbe
 from app.engine.detect.xss import XssDetector
+from app.engine.detect.stored_xss import StoredXssDetector
 from app.models.endpoint import Endpoint
 from app.models.finding import Finding, FindingStatus
 from app.models.evidence import Evidence
@@ -99,6 +100,23 @@ class DetectStage:
                             seen.add(key)
                             await self._store(ctx, probe, candidate)
                             candidates_found += 1
+
+                # Stored XSS is cross-endpoint (inject at A, surfaces at B), so it runs
+                # as a batch pass over all probes + sink pages once XSS is enabled.
+                if "xss" in ctx.detectors and not self._stopped():
+                    sink_urls = await self._load_sink_urls(ctx)
+                    try:
+                        pairs = await StoredXssDetector().detect_all(probes, sink_urls, http)
+                    except Exception as e:
+                        logger.debug("Stored XSS detector failed: %s", e)
+                        pairs = []
+                    for probe, candidate in pairs:
+                        key = (probe.id, candidate.param, candidate.type)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        await self._store(ctx, probe, candidate)
+                        candidates_found += 1
             finally:
                 await request_ctx.dispose()
                 if temp_path:
@@ -125,6 +143,29 @@ class DetectStage:
             probes.append(EndpointProbe.from_endpoint(ep))
         return probes
 
+    async def _load_sink_urls(self, ctx: "ScanContext") -> list[str]:
+        """
+        Pages where stored content might surface: every discovered GET URL plus the
+        base URL. Deduped, excluding logout/destructive routes.
+        """
+        urls: list[str] = []
+        seen: set[str] = set()
+
+        def add(u: str):
+            if u and u not in seen and not ctx.excluder.is_excluded(u):
+                seen.add(u)
+                urls.append(u)
+
+        add(ctx.base_url)
+        async with ctx.session_factory() as db:
+            rows = (await db.execute(
+                select(Endpoint).where(Endpoint.scan_id == ctx.scan_id)
+            )).scalars().all()
+        for ep in rows:
+            if (ep.method or "GET").upper() == "GET":
+                add(ep.url)
+        return urls
+
     async def _store(self, ctx: "ScanContext", probe: EndpointProbe, candidate):
         async with ctx.session_factory() as db:
             finding = Finding(
@@ -146,6 +187,13 @@ class DetectStage:
 
     @staticmethod
     def _reproduction(candidate) -> str:
+        if candidate.type == "stored_xss":
+            sink = next((c for t, c in candidate.evidence if t == "stored_sink"), "another page")
+            return (
+                f"1. Send the request below with '{candidate.param}' set to the payload.\n"
+                f"2. Open {sink} and observe the payload rendered un-encoded (it was stored).\n\n"
+                f"Payload: {candidate.payload}"
+            )
         return (
             f"1. Send the request below with '{candidate.param}' set to the payload.\n"
             f"2. Observe the payload reflected un-encoded in the HTML response.\n\n"

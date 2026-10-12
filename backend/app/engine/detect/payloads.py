@@ -26,6 +26,21 @@ def xss_marker_signal(token: str) -> str:
     return f"{XSS_MARKER_PREFIX}{token}<svg/onload=1>"
 
 
+# Stored XSS uses its own prefix so a stored marker is never confused with a
+# reflected one, and so we can map a sink hit back to the injection that seeded it.
+STORED_MARKER_PREFIX = "pstx"
+
+
+def stored_marker_payload(token: str) -> str:
+    """Stored-XSS reflection probe: a distinct token + raw special chars."""
+    return f'{STORED_MARKER_PREFIX}{token}<svg/onload=1>"\''
+
+
+def stored_marker_signal(token: str) -> str:
+    """The un-escaped substring that, if found on a DIFFERENT page, means it was stored."""
+    return f"{STORED_MARKER_PREFIX}{token}<svg/onload=1>"
+
+
 def xss_exec_payloads(token: str) -> list[str]:
     """Execution probes for the browser verifier, across common contexts."""
     cb = f"window.{EXEC_BINDING}"

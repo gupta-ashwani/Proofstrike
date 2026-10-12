@@ -130,6 +130,76 @@ class XssVerifier:
                  "CSRF/session/validation (our input did not reflect); verify manually",
         )
 
+    # ── STORED ───────────────────────────────────────────────────────────
+    async def verify_stored(self, page, fired: list, inject_probe: EndpointProbe,
+                            param: str, sink_url: str, limiter,
+                            allow_post: bool = True) -> VerifyResult:
+        """
+        Confirm a stored XSS: submit an exec payload at the injection point, then
+        render the SINK page and check the stored payload executes there.
+
+        The fire buffer is cleared after the injection submit so that a reflection
+        on the injection page itself cannot be mistaken for stored execution — only
+        a callback that fires while viewing the sink counts.
+        """
+        if inject_probe.method != "GET" and not allow_post:
+            return VerifyResult(
+                False, attempted=False,
+                note="stored via a POST parameter; POST verification is disabled for this scan",
+            )
+
+        any_reflected = False
+        reflected_snippet = ""
+        for payload in xss_exec_payloads(secrets.token_hex(5)):
+            token = _token_of(payload)
+            params = inject_probe.inject(param, payload)
+            try:
+                # 1. Store the payload at the injection point.
+                if inject_probe.method == "GET":
+                    target = f"{inject_probe.url}?{urlencode(params)}"
+                    async with limiter:
+                        await page.goto(target, wait_until="domcontentloaded", timeout=20_000)
+                else:
+                    await self._submit_post(page, inject_probe.url, params, limiter)
+
+                # 2. Ignore anything that fired on the injection page (that's reflected).
+                fired.clear()
+
+                # 3. View the sink page — stored payload should execute here.
+                async with limiter:
+                    await page.goto(sink_url, wait_until="domcontentloaded", timeout=20_000)
+                fired_ok = await self._await_fire(page, fired, token)
+            except Exception as e:
+                logger.debug("Stored XSS verify failed (%s @ %s): %s", inject_probe.url, sink_url, e)
+                continue
+
+            if fired_ok:
+                desc = (f"Stored via {inject_probe.method} {inject_probe.url} (param '{param}')\n"
+                        f"Executes when viewing: {sink_url}\n\n{urlencode(params)}")
+                return await self._confirmed(page, token, payload, sink_url, desc)
+
+            try:
+                content = await page.content()
+                if token in content:
+                    any_reflected = True
+                    if not reflected_snippet:
+                        reflected_snippet = _snip(content, token)
+            except Exception:
+                pass
+
+        if any_reflected:
+            return VerifyResult(
+                False, attempted=True, dom_snippet=reflected_snippet,
+                note="payload is stored and shown on the sink page but did not execute "
+                     "(see how it was reflected below — it may be encoded or in a "
+                     "non-executing context)",
+            )
+        return VerifyResult(
+            False, attempted=False,
+            note="could not confirm stored XSS — the payload no longer appeared on the "
+                 "sink page (it may have been rejected, moderated, or expired); verify manually",
+        )
+
     async def _submit_post(self, page, action: str, params: dict, limiter):
         """Submit a real POST from the browser via a hidden auto-submitting form."""
         data = json.dumps({"action": action, "params": params})
