@@ -1,5 +1,5 @@
 """
-Crawler router — trigger and monitor crawl jobs for scans.
+Crawler router — trigger and monitor scan runs (crawl → detect → verify).
 """
 
 import logging
@@ -12,19 +12,19 @@ from sqlalchemy import select
 from app.database import get_db, make_engine, make_session_factory
 from app.models.scan import Scan, ScanStatus
 from app.models.target import Target
-from app.engine.crawler.engine import CrawlerEngine
+from app.engine.pipeline import ScanPipeline
 from app.engine.runner import start_in_thread
 
 logger = logging.getLogger("proofstrike.routers.crawler")
 
 router = APIRouter(prefix="/api/scans", tags=["Crawler"])
 
-# Track running crawlers for cancellation (accessed from request handlers and crawler threads)
-_active_crawlers: dict[str, CrawlerEngine] = {}
+# Track running scans for cancellation (accessed from request handlers and scan threads)
+_active_scans: dict[str, ScanPipeline] = {}
 _active_lock = threading.Lock()
 
-# Scan states from which a (re-)crawl may be started
-RECRAWLABLE_STATUSES = (
+# Scan states from which a (re-)run may be started
+RERUNNABLE_STATUSES = (
     ScanStatus.QUEUED.value,
     ScanStatus.COMPLETED.value,
     ScanStatus.FAILED.value,
@@ -32,87 +32,86 @@ RECRAWLABLE_STATUSES = (
 )
 
 
-async def _run_crawler(engine: CrawlerEngine):
-    """Runs on the crawler's own thread/event loop, so it needs its own DB engine."""
+async def _run_pipeline(pipeline: ScanPipeline):
+    """Runs on the scan's own thread/event loop, so it needs its own DB engine."""
     db_engine = make_engine()
     try:
-        stats = await engine.run(make_session_factory(db_engine))
-        logger.info("Crawl finished for scan %s: %s", engine.scan_id[:8], stats)
+        pipeline.session_factory = make_session_factory(db_engine)
+        stats = await pipeline.run()
+        logger.info("Scan finished for %s: %s", pipeline.scan_id[:8], stats)
     except Exception as e:
-        logger.error("Crawl failed for scan %s: %s", engine.scan_id[:8], e, exc_info=True)
+        logger.error("Scan failed for %s: %s", pipeline.scan_id[:8], e, exc_info=True)
     finally:
         await db_engine.dispose()
         with _active_lock:
-            _active_crawlers.pop(engine.scan_id, None)
+            _active_scans.pop(pipeline.scan_id, None)
 
 
-def launch_crawler(scan_id: str) -> bool:
+def launch_scan(scan_id: str) -> bool:
     """
-    Start the crawler for a scan on a background thread.
+    Start the scan pipeline on a background thread.
 
-    Returns False if a crawler is already running for this scan.
+    Returns False if the scan is already running.
     """
     with _active_lock:
-        if scan_id in _active_crawlers:
+        if scan_id in _active_scans:
             return False
-        engine = CrawlerEngine(scan_id=scan_id)
-        _active_crawlers[scan_id] = engine
+        pipeline = ScanPipeline(scan_id=scan_id)
+        _active_scans[scan_id] = pipeline
 
-    start_in_thread(f"crawler-{scan_id[:8]}", lambda: _run_crawler(engine))
+    start_in_thread(f"scan-{scan_id[:8]}", lambda: _run_pipeline(pipeline))
     return True
+
+
+def cancel_scan(scan_id: str) -> bool:
+    with _active_lock:
+        pipeline = _active_scans.get(scan_id)
+    if pipeline:
+        pipeline.cancel()
+        return True
+    return False
 
 
 @router.post("/{scan_id}/crawl", status_code=202)
 async def start_crawl(scan_id: str, db: AsyncSession = Depends(get_db)):
     """
-    Trigger (or re-run) the crawler for a scan.
+    Trigger (or re-run) the full scan pipeline for a scan.
 
-    The crawler runs in the background — this endpoint returns immediately.
-    Endpoints from a previous crawl of this scan are replaced.
-    Monitor progress via GET /api/scans/{scan_id}/progress.
+    Runs in the background — this endpoint returns immediately. Results from a
+    previous run of this scan are replaced. Monitor via GET /api/scans/{id}/progress.
     """
-    # Verify scan exists and is in a valid state
     result = await db.execute(select(Scan).where(Scan.id == scan_id))
     scan = result.scalar_one_or_none()
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
 
-    if scan.status not in RECRAWLABLE_STATUSES:
+    if scan.status not in RERUNNABLE_STATUSES:
         raise HTTPException(
             status_code=400,
-            detail=f"Scan is in '{scan.status}' state — can only crawl from "
-                   f"{', '.join(repr(s) for s in RECRAWLABLE_STATUSES)}",
+            detail=f"Scan is in '{scan.status}' state — can only run from "
+                   f"{', '.join(repr(s) for s in RERUNNABLE_STATUSES)}",
         )
 
-    # Verify target exists
     result = await db.execute(select(Target).where(Target.id == scan.target_id))
     target = result.scalar_one_or_none()
     if not target:
         raise HTTPException(status_code=404, detail="Target not found")
 
-    if not launch_crawler(scan_id):
-        raise HTTPException(status_code=409, detail="Crawler already running for this scan")
+    if not launch_scan(scan_id):
+        raise HTTPException(status_code=409, detail="Scan already running")
 
     return {
-        "message": "Crawler started",
+        "message": "Scan started",
         "scan_id": scan_id,
         "target_url": target.base_url,
         "config": scan.config,
     }
 
 
-def cancel_crawler(scan_id: str) -> bool:
-    with _active_lock:
-        engine = _active_crawlers.get(scan_id)
-    if engine:
-        engine.cancel()
-        return True
-    return False
-
 @router.post("/{scan_id}/crawl/stop", status_code=200)
 async def stop_crawl(scan_id: str):
-    """Stop a running crawler."""
-    if not cancel_crawler(scan_id):
-        raise HTTPException(status_code=404, detail="No active crawler for this scan")
+    """Stop a running scan."""
+    if not cancel_scan(scan_id):
+        raise HTTPException(status_code=404, detail="No active scan to stop")
 
-    return {"message": "Crawler stop signal sent", "scan_id": scan_id}
+    return {"message": "Scan stop signal sent", "scan_id": scan_id}

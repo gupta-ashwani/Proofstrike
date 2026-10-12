@@ -19,7 +19,7 @@ from app.schemas.finding import (
     EndpointResponse,
     EndpointListResponse,
 )
-from app.routers.crawler import launch_crawler, cancel_crawler
+from app.routers.crawler import launch_scan, cancel_scan
 
 router = APIRouter(prefix="/api/scans", tags=["Scans"])
 
@@ -47,7 +47,7 @@ async def create_scan(
 
     # Launch the crawler on its own background thread (see app.engine.runner).
     # The scan row is committed above, so the crawler thread can load it.
-    launch_crawler(scan.id)
+    launch_scan(scan.id)
 
     return ScanResponse(
         id=scan.id,
@@ -226,7 +226,7 @@ async def stop_scan(scan_id: str, db: AsyncSession = Depends(get_db)):
     scan.completed_at = datetime.now(timezone.utc)
     
     # Cancel crawler if it's currently running
-    cancel_crawler(scan_id)
+    cancel_scan(scan_id)
     
     await db.flush()
     await db.refresh(scan)

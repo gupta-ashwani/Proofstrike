@@ -13,6 +13,10 @@ export default function NewScan() {
   const [targetId, setTargetId] = useState(preselectedTargetId);
   const [depth, setDepth] = useState(3);
   const [budget, setBudget] = useState(250);
+  const [requestDelay, setRequestDelay] = useState(0);
+  const [maxConcurrency, setMaxConcurrency] = useState(1);
+  const [scopeHosts, setScopeHosts] = useState('');
+  const [useSitemap, setUseSitemap] = useState(true);
   const [detectors, setDetectors] = useState({
     xss: true,
     sqli: true,
@@ -66,6 +70,10 @@ export default function NewScan() {
         config: {
           crawl_depth: Number(depth),
           request_budget: Number(budget),
+          request_delay: Number(requestDelay),
+          max_concurrency: Number(maxConcurrency),
+          scope_hosts: scopeHosts.split(/[\s,]+/).filter(Boolean),
+          use_sitemap: useSitemap,
           detectors: selectedDetectors,
         },
       });
@@ -138,14 +146,14 @@ export default function NewScan() {
           <div className="form-section">
             <div className="section-title-bar">
               <span className="section-number">2</span>
-              <h3 className="text-subheading">Crawler Engine Limits</h3>
+              <h3 className="text-subheading">Crawler Limits & Rate Control</h3>
             </div>
 
             <div className="crawler-controls">
               <div className="form-group">
                 <div className="slider-label-row">
                   <label className="form-label">Crawl Depth</label>
-                  <span className="slider-val text-mono">{depth} levels</span>
+                  <span className="slider-val text-mono">{depth} {depth === 1 ? 'level' : 'levels'}</span>
                 </div>
                 <input
                   type="range"
@@ -156,25 +164,96 @@ export default function NewScan() {
                   className="range-input"
                 />
                 <span className="form-hint">
-                  Maximum link hop depth from the base URL.
+                  How many link-hops to follow from the start URL. 1 = start page + its
+                  direct links. Higher = deeper coverage, but slower.
                 </span>
               </div>
 
               <div className="form-group">
-                <label className="form-label">Request Budget</label>
+                <label className="form-label">Request Budget (max pages)</label>
                 <input
                   type="number"
-                  min="50"
+                  min="1"
                   max="2000"
-                  step="50"
+                  step="1"
                   value={budget}
                   onChange={(e) => setBudget(e.target.value)}
                 />
                 <span className="form-hint">
-                  Safety budget to prevent infinite crawling on large apps.
+                  Hard cap on total pages visited. The crawl stops here even if more pages
+                  exist within the depth limit.
+                </span>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Request Delay</label>
+                <select
+                  value={requestDelay}
+                  onChange={(e) => setRequestDelay(e.target.value)}
+                >
+                  <option value="0">None — fastest</option>
+                  <option value="0.25">0.25s — light</option>
+                  <option value="0.5">0.5s — polite</option>
+                  <option value="1">1s — gentle</option>
+                  <option value="2">2s — very gentle</option>
+                </select>
+                <span className="form-hint">
+                  Minimum gap between requests. Raise it for shared, public, or fragile
+                  targets so the scan stays polite and avoids rate-limiting.
+                </span>
+              </div>
+
+              <div className="form-group">
+                <div className="slider-label-row">
+                  <label className="form-label">Max Concurrency</label>
+                  <span className="slider-val text-mono">
+                    {maxConcurrency} {maxConcurrency === 1 ? 'request' : 'requests'}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="1"
+                  max="8"
+                  value={maxConcurrency}
+                  onChange={(e) => setMaxConcurrency(e.target.value)}
+                  className="range-input"
+                />
+                <span className="form-hint">
+                  How many requests may run at once. Crawling is sequential; this mainly
+                  speeds up the testing phase. Lower = gentler on the target.
                 </span>
               </div>
             </div>
+
+            <div className="form-group scope-group">
+              <label className="form-label">Additional In-Scope Hosts (optional)</label>
+              <input
+                type="text"
+                placeholder="api.example.com, staging.example.com"
+                value={scopeHosts}
+                onChange={(e) => setScopeHosts(e.target.value)}
+              />
+              <span className="form-hint">
+                The target's own host (and its subdomains) is always in scope. Add other
+                hosts here — e.g. a separate API subdomain — to crawl them too. Comma or
+                space separated.
+              </span>
+            </div>
+
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={useSitemap}
+                onChange={(e) => setUseSitemap(e.target.checked)}
+              />
+              <span>
+                <span className="checkbox-title">Discover from sitemap.xml &amp; robots.txt</span>
+                <span className="form-hint">
+                  Seed the crawl with URLs from the target's sitemap and robots.txt, to
+                  reach pages that nothing links to.
+                </span>
+              </span>
+            </label>
           </div>
 
           {/* Active Security Detectors */}

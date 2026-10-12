@@ -111,25 +111,19 @@ class EndpointExtractor:
     Extracts endpoints from both the DOM and intercepted network traffic.
 
     Usage:
-        extractor = EndpointExtractor(page, base_domain="example.com")
+        extractor = EndpointExtractor(page, scope)
         dom_endpoints = await extractor.extract_from_dom()
         net_endpoints = extractor.extract_from_network(captured_requests)
         all_endpoints = extractor.merge(dom_endpoints + net_endpoints)
     """
 
-    def __init__(self, page: Page, base_domain: str):
+    def __init__(self, page: Page, scope):
         self.page = page
-        self.base_domain = base_domain.lower()
+        self.scope = scope
 
     def _is_same_domain(self, url: str) -> bool:
-        """Check if URL belongs to target domain."""
-        try:
-            parsed = urlparse(url)
-            host = parsed.netloc.lower().split(":")[0]
-            base = self.base_domain.split(":")[0]
-            return host == base or host.endswith("." + base)
-        except Exception:
-            return False
+        """Check if URL is in the crawl scope."""
+        return self.scope.contains(url)
 
     async def extract_from_dom(self) -> list[DiscoveredEndpoint]:
         """

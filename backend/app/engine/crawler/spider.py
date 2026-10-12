@@ -153,6 +153,9 @@ class Spider:
         wait_after_navigation: int = 2_000,
         excluder: UrlExcluder | None = None,
         session_guard: SessionGuard | None = None,
+        limiter=None,
+        scope=None,
+        extra_seeds: list[str] | None = None,
     ):
         self.page = page
         self.base_url = base_url.rstrip("/")
@@ -161,10 +164,13 @@ class Spider:
         self.wait_after_navigation = wait_after_navigation
         self.excluder = excluder or UrlExcluder()
         self.session_guard = session_guard
+        self.limiter = limiter
+        self.extra_seeds = extra_seeds or []
 
-        # Parse base domain for boundary checking
-        parsed_base = urlparse(self.base_url)
-        self.base_domain = parsed_base.netloc.lower()
+        # In-scope domain(s). Default to the base URL's own host + subdomains.
+        from app.engine.crawler.scope import DomainScope
+        self.scope = scope or DomainScope(self.base_url)
+        self.base_domain = urlparse(self.base_url).netloc.lower()
 
         # BFS state
         self.visited: set[str] = set()
@@ -187,6 +193,18 @@ class Spider:
         canonical_base = canonicalize_url(self.base_url)
         self.queue.append((self.base_url, 0))
         self.visited.add(canonical_base)
+
+        # Seed extra URLs (e.g. from sitemap/robots), filtered like discovered links
+        for seed in self.extra_seeds:
+            canonical = canonicalize_url(seed)
+            if (
+                canonical not in self.visited
+                and self.scope.contains(seed)
+                and is_crawlable_url(seed)
+                and not self.excluder.is_excluded(seed)
+            ):
+                self.visited.add(canonical)
+                self.queue.append((seed, 0))
 
         while self.queue and not self._cancelled:
             # Budget check
@@ -213,7 +231,7 @@ class Spider:
                 canonical = canonicalize_url(link)
                 if (
                     canonical not in self.visited
-                    and is_same_domain(link, self.base_domain)
+                    and self.scope.contains(link)
                     and is_crawlable_url(link)
                 ):
                     self.visited.add(canonical)
@@ -230,7 +248,11 @@ class Spider:
 
     async def _navigate(self, url: str, result: CrawlResult):
         """Load url and wait for it to settle, recording status and final URL."""
-        response = await self.page.goto(url, wait_until="domcontentloaded")
+        if self.limiter is not None:
+            async with self.limiter:
+                response = await self.page.goto(url, wait_until="domcontentloaded")
+        else:
+            response = await self.page.goto(url, wait_until="domcontentloaded")
 
         if response:
             result.status = response.status
@@ -331,7 +353,7 @@ class Spider:
         # Filter to same domain only
         same_domain_links = [
             link for link in links
-            if is_same_domain(link, self.base_domain)
+            if self.scope.contains(link)
         ]
 
         return same_domain_links

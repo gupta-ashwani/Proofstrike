@@ -47,16 +47,19 @@ class BrowserManager:
         timeout: int = 30_000,
         viewport_width: int = 1280,
         viewport_height: int = 720,
+        storage_state: dict | None = None,
     ):
         self.headless = headless
         self.timeout = timeout
         self.viewport_width = viewport_width
         self.viewport_height = viewport_height
+        self.storage_state = storage_state
 
         self._playwright = None
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
         self._captured_requests: list[CapturedRequest] = []
+        self._temp_state_path = None
 
     async def __aenter__(self):
         await self.launch()
@@ -70,17 +73,44 @@ class BrowserManager:
         logger.info("Launching Playwright Chromium (headless=%s)", self.headless)
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch(headless=self.headless)
-        self._context = await self._browser.new_context(
+        context_args = dict(
             viewport={"width": self.viewport_width, "height": self.viewport_height},
             ignore_https_errors=True,
             java_script_enabled=True,
         )
+        self._temp_state_path = None
+        if self.storage_state:
+            # Reuse the crawl's authenticated session; accept a dict or fall back to a file
+            try:
+                self._context = await self._browser.new_context(
+                    storage_state=self.storage_state, **context_args
+                )
+            except Exception:
+                import json
+                import os
+                import tempfile
+                fd, path = tempfile.mkstemp(suffix=".json")
+                with os.fdopen(fd, "w") as f:
+                    json.dump(self.storage_state, f)
+                self._temp_state_path = path
+                self._context = await self._browser.new_context(
+                    storage_state=path, **context_args
+                )
+        else:
+            self._context = await self._browser.new_context(**context_args)
         self._context.set_default_timeout(self.timeout)
         self._context.set_default_navigation_timeout(self.timeout)
         logger.info("Browser launched successfully")
 
     async def close(self):
         """Close browser and cleanup Playwright."""
+        if self._temp_state_path:
+            import os
+            try:
+                os.unlink(self._temp_state_path)
+            except OSError:
+                pass
+            self._temp_state_path = None
         if self._context:
             await self._context.close()
         if self._browser:
@@ -148,6 +178,15 @@ class BrowserManager:
         return await self._playwright.request.new_context(
             ignore_https_errors=True, timeout=10_000
         )
+
+    async def get_storage_state(self) -> dict | None:
+        """
+        Export the context's session (cookies + localStorage) so a later stage can
+        recreate an authenticated context. Contains secrets — keep in memory only.
+        """
+        if not self._context:
+            return None
+        return await self._context.storage_state()
 
     async def get_cookies(self) -> list[dict]:
         """Get all cookies from the browser context."""

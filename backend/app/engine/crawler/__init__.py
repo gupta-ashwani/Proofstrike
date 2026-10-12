@@ -1,9 +1,9 @@
 """
 ProofStrike Crawler Engine — Playwright-based web application discovery.
 
-Exports the main CrawlerEngine class for use by the scan orchestrator.
+Exports the crawl stage used by the scan pipeline.
 """
 
-from app.engine.crawler.engine import CrawlerEngine
+from app.engine.crawler.engine import CrawlStage
 
-__all__ = ["CrawlerEngine"]
+__all__ = ["CrawlStage"]
