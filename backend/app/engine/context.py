@@ -32,7 +32,7 @@ DEFAULT_MAX_DEPTH = 5
 DEFAULT_MAX_PAGES = 100
 DEFAULT_REQUEST_DELAY = 0.0      # seconds between requests (0 = no artificial gap)
 DEFAULT_MAX_CONCURRENCY = 1
-DEFAULT_DETECTORS = ["xss", "sqli"]
+DEFAULT_DETECTORS = ["xss", "sqli", "idor"]
 
 
 def _int(config: dict, keys: tuple[str, ...], default: int, minimum: int) -> int:

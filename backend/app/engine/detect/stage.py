@@ -13,6 +13,8 @@ from sqlalchemy import select
 
 from app.engine.detect.base import DetectorHttp, EndpointProbe
 from app.engine.detect.xss import XssDetector
+from app.engine.detect.sqli import SqliDetector
+from app.engine.detect.idor import IdorDetector
 from app.engine.detect.stored_xss import StoredXssDetector
 from app.models.endpoint import Endpoint
 from app.models.finding import Finding, FindingStatus
@@ -23,8 +25,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("proofstrike.detect.stage")
 
-# Detectors implemented so far. (sqli / idor to follow.)
-AVAILABLE = {"xss": XssDetector}
+# Detectors implemented so far.
+AVAILABLE = {"xss": XssDetector, "sqli": SqliDetector, "idor": IdorDetector}
 
 
 async def new_request_context(playwright, storage_state):
@@ -193,6 +195,15 @@ class DetectStage:
                 f"1. Send the request below with '{candidate.param}' set to the payload.\n"
                 f"2. Open {sink} and observe the payload rendered un-encoded (it was stored).\n\n"
                 f"Payload: {candidate.payload}"
+            )
+        if candidate.type == "idor":
+            return (
+                f"1. Send the request with '{candidate.param}' set to its baseline id, note the record.\n"
+                f"2. Change '{candidate.param}' to the neighbouring id '{candidate.payload}' and observe a "
+                f"different, valid record returned (no authorisation check).\n"
+                f"3. Change it to a far out-of-range id and observe it is rejected — confirming the "
+                f"parameter indexes records directly.\n\n"
+                f"Neighbouring id: {candidate.payload}"
             )
         return (
             f"1. Send the request below with '{candidate.param}' set to the payload.\n"

@@ -11,12 +11,16 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from playwright.async_api import async_playwright
 from sqlalchemy import select
 
 from app.engine.crawler.browser import BrowserManager
-from app.engine.detect.base import EndpointProbe
+from app.engine.detect.base import DetectorHttp, EndpointProbe
+from app.engine.detect.stage import new_request_context
 from app.engine.detect.stored_xss import SINK_EVIDENCE_TYPE
 from app.engine.verify.xss_verifier import XssVerifier
+from app.engine.verify.sqli_verifier import SqliVerifier
+from app.engine.verify.idor_verifier import IdorVerifier
 from app.models.endpoint import Endpoint
 from app.models.finding import Finding, FindingStatus
 from app.models.evidence import Evidence
@@ -42,14 +46,31 @@ class VerifyStage:
     async def run(self, ctx: "ScanContext"):
         reflected = await self._load_candidates(ctx, "xss")
         stored = await self._load_stored_candidates(ctx)
-        if not reflected and not stored:
+        sqli = await self._load_candidates(ctx, "sqli")
+        idor = await self._load_candidates(ctx, "idor")
+        if not reflected and not stored and not sqli and not idor:
             ctx.stats.setdefault("confirmed_findings", 0)
             return
 
-        logger.info("Verify stage: %d reflected + %d stored XSS candidate(s)",
-                    len(reflected), len(stored))
-        confirmed = rejected = unverified = 0
+        logger.info("Verify stage: %d reflected + %d stored XSS + %d SQLi + %d IDOR candidate(s)",
+                    len(reflected), len(stored), len(sqli), len(idor))
+        self._counts = {"confirmed": 0, "rejected": 0, "unverified": 0}
 
+        if reflected or stored:
+            await self._verify_xss(ctx, reflected, stored)
+        if (sqli or idor) and not self._stopped():
+            await self._verify_http(ctx, sqli, idor)
+
+        confirmed = self._counts["confirmed"]
+        rejected = self._counts["rejected"]
+        unverified = self._counts["unverified"]
+        ctx.stats["confirmed_findings"] = confirmed
+        ctx.stats["rejected_findings"] = rejected
+        ctx.stats["unverified_findings"] = unverified
+        logger.info("Verify stage done: %d confirmed, %d rejected, %d unverified",
+                    confirmed, rejected, unverified)
+
+    async def _verify_xss(self, ctx: "ScanContext", reflected, stored):
         async with BrowserManager(headless=ctx.headless, storage_state=ctx.storage_state) as browser:
             page = await browser.new_page()
             page.on("dialog", lambda d: d.dismiss())  # don't block on any alert()
@@ -72,11 +93,7 @@ class VerifyStage:
                     )
                     if result.confirmed:
                         break
-                outcome = self._classify(result)
-                await self._apply(ctx, finding_id, result, outcome)
-                confirmed += outcome == "confirmed"
-                rejected += outcome == "rejected"
-                unverified += outcome == "unverified"
+                await self._record(ctx, finding_id, result)
 
             for finding_id, endpoint, param, sink_url in stored:
                 if self._stopped():
@@ -93,17 +110,47 @@ class VerifyStage:
                     )
                     if result.confirmed:
                         break
-                outcome = self._classify(result)
-                await self._apply(ctx, finding_id, result, outcome)
-                confirmed += outcome == "confirmed"
-                rejected += outcome == "rejected"
-                unverified += outcome == "unverified"
+                await self._record(ctx, finding_id, result)
 
-        ctx.stats["confirmed_findings"] = confirmed
-        ctx.stats["rejected_findings"] = rejected
-        ctx.stats["unverified_findings"] = unverified
-        logger.info("Verify stage done: %d confirmed, %d rejected, %d unverified",
-                    confirmed, rejected, unverified)
+    async def _verify_http(self, ctx: "ScanContext", sqli, idor):
+        """SQLi and IDOR are pure-HTTP checks — verify over one APIRequestContext, no browser."""
+        temp_path = None
+        async with async_playwright() as p:
+            request_ctx, temp_path = await new_request_context(p, ctx.storage_state)
+            http = DetectorHttp(request_ctx, ctx.limiter)
+            try:
+                await self._verify_with(ctx, http, sqli, SqliVerifier())
+                if not self._stopped():
+                    await self._verify_with(ctx, http, idor, IdorVerifier())
+            finally:
+                await request_ctx.dispose()
+                if temp_path:
+                    import os
+                    try:
+                        os.unlink(temp_path)
+                    except OSError:
+                        pass
+
+    async def _verify_with(self, ctx: "ScanContext", http, items, verifier):
+        """Run one HTTP verifier over its candidates (shared by SQLi and IDOR)."""
+        for finding_id, endpoint, param in items:
+            if self._stopped():
+                break
+            if ctx.excluder.is_excluded(endpoint.url):
+                continue
+            probe = EndpointProbe.from_endpoint(endpoint)
+            params_to_try = [param] if param in probe.baseline else probe.testable_params
+            result = None
+            for candidate_param in params_to_try:
+                result = await verifier.verify(http, probe, candidate_param)
+                if result.confirmed:
+                    break
+            await self._record(ctx, finding_id, result)
+
+    async def _record(self, ctx: "ScanContext", finding_id: str, result):
+        outcome = self._classify(result)
+        await self._apply(ctx, finding_id, result, outcome)
+        self._counts[outcome] += 1
 
     @staticmethod
     def _classify(result) -> str:
@@ -179,10 +226,19 @@ class VerifyStage:
             if not finding:
                 return
             finding.status = FindingStatus.CONFIRMED.value
+            if finding.type == "sqli":
+                proof = ("the database evaluated injected SQL — a TRUE vs FALSE "
+                         "condition produced a deterministic, repeatable response split")
+            elif finding.type == "idor":
+                proof = ("neighbouring object identifiers returned distinct, valid records "
+                         "with the same template while an out-of-range identifier was "
+                         "rejected — the reference selects records directly with no "
+                         "access-control check, deterministically on every repeat")
+            else:
+                proof = "the payload executed in a real browser (callback fired)"
             finding.description = (
                 (finding.description or "")
-                + f"\n\nCONFIRMED: the payload executed in a real browser "
-                  f"(callback fired). Confirming payload: {result.payload}"
+                + f"\n\nCONFIRMED: {proof}. Confirming payload: {result.payload}"
             )
             if result.screenshot_b64:
                 db.add(Evidence(finding_id=finding_id, type="screenshot", content=result.screenshot_b64))

