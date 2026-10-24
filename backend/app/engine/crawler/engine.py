@@ -184,6 +184,23 @@ class CrawlStage:
                 # Hand the logged-in session to later stages (kept in memory only)
                 ctx.storage_state = await browser.get_storage_state()
 
+        # ── Capture a second user's session (optional, for cross-session IDOR) ──
+        # A fresh browser so User B's cookies never mix with User A's crawl session.
+        if ctx.auth_config_b and ctx.authenticated and not self._stopped():
+            try:
+                async with BrowserManager(headless=ctx.headless) as browser_b:
+                    page_b = await browser_b.new_page()
+                    if await AuthHandler(page_b).login(ctx.auth_config_b):
+                        ctx.storage_state_b = await browser_b.get_storage_state()
+                        ctx.stats["second_session"] = True
+                        logger.info("Captured second user's session for cross-session IDOR")
+                    else:
+                        ctx.stats["second_session"] = False
+                        logger.warning("Second-user login failed — cross-session IDOR disabled")
+            except Exception as e:
+                ctx.stats["second_session"] = False
+                logger.warning("Second-user session capture failed: %s", e)
+
         # ── Store endpoints (credentials masked) ──
         for ep in unique_endpoints:
             ep.params = mask_sensitive_params(ep.params, ctx.secret_values)

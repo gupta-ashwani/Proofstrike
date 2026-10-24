@@ -31,6 +31,7 @@ export default function ScanDetails() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [stopping, setStopping] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
 
   const fetchScanData = async () => {
     try {
@@ -87,8 +88,9 @@ export default function ScanDetails() {
     }
   };
 
-  const handleExport = () => {
-    window.open(`/api/scans/${id}/report?format=json`, '_blank');
+  const handleExport = (format) => {
+    setExportOpen(false);
+    window.open(`/api/scans/${id}/report?format=${format}`, '_blank');
   };
 
   if (loading && !scan) {
@@ -162,10 +164,22 @@ export default function ScanDetails() {
               <span>{stopping ? 'Stopping...' : 'Stop Scan'}</span>
             </button>
           )}
-          <button className="btn btn-secondary" onClick={handleExport}>
-            <Download size={16} />
-            <span>Export Report</span>
-          </button>
+          <div className="export-menu-wrap">
+            <button className="btn btn-secondary" onClick={() => setExportOpen((o) => !o)}>
+              <Download size={16} />
+              <span>Export Report</span>
+            </button>
+            {exportOpen && (
+              <>
+                <div className="export-backdrop" onClick={() => setExportOpen(false)} />
+                <div className="export-menu">
+                  <button onClick={() => handleExport('pdf')}>PDF report</button>
+                  <button onClick={() => handleExport('html')}>HTML report</button>
+                  <button onClick={() => handleExport('json')}>JSON (raw data)</button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 

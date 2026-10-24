@@ -60,16 +60,21 @@ REMEDIATION = (
 )
 
 
-def _is_reference(name: str, value: str) -> bool:
-    """A param worth testing for IDOR: an enumerable (integer) object identifier."""
-    if not _INT_RE.match(str(value or "")):
-        return False
+def _is_reference_name(name: str) -> bool:
+    """A parameter name that denotes an object reference (so worth an access-control look)."""
     low = name.lower()
     if low == "id":
         return False  # precision-first default (public catalogues key on bare id)
     if low in _REFERENCE_NAMES:
         return True
     return low.endswith("id") or low.endswith("_no")
+
+
+def _is_reference(name: str, value: str) -> bool:
+    """A param worth the single-session ENUMERATION test: an *integer* object identifier."""
+    if not _INT_RE.match(str(value or "")):
+        return False
+    return _is_reference_name(name)
 
 
 def _neighbors(value: str) -> list[str]:
@@ -223,5 +228,108 @@ class IdorDetector:
                  f"  out-of-range:  {absent_val}  ({absent_desc})\n"
                  f"  similarity neighbour-vs-baseline: {sim_nb:.3f} (same template)\n"
                  f"  similarity absent-vs-baseline:    {sim_abs:.3f} (rejected)"),
+            ],
+        )
+
+
+# ── cross-session (two-user) IDOR ────────────────────────────────────────────
+# A direct access-control proof: if User B, using B's own session, can fetch the
+# object that belongs to User A (A's identifier returns A's content to B), the
+# endpoint is missing an ownership check. Needs two authenticated sessions.
+
+_CROSS_MIN = 0.90       # B's view of A's object must be ~identical to A's own view
+_DENY_HINTS = (
+    "login", "log in", "sign in", "signin", "access denied", "forbidden",
+    "unauthorized", "unauthorised", "not authorized", "not allowed",
+    "permission denied", "please authenticate", "403", "401",
+)
+
+CROSS_REMEDIATION = (
+    "Scope every object lookup to the authenticated principal: resolve the owner from "
+    "the session, not from a client-supplied identifier, and reject (404/403) when the "
+    "requested object is not owned by (or shared with) the caller. Add server-side "
+    "authorization checks on every read and write, and cover them with tests."
+)
+
+
+def _looks_denied(text: str) -> bool:
+    low = text[:_MAX_CMP].lower()
+    return any(h in low for h in _DENY_HINTS)
+
+
+def cross_session_oracle(
+    a_text: str, b_text: str, b_status: int, value: str,
+) -> tuple[bool, float]:
+    """
+    Decide whether User B received User A's object.
+
+    `a_text` is A's own response for A's identifier; `b_text` is B's response to the
+    *same* request (B's session, A's identifier). A hit means B got a successful,
+    non-denial page essentially identical to A's — i.e. B read A's data.
+    Returns (hit, similarity).
+    """
+    if b_status != 200 or _looks_denied(b_text):
+        return False, 0.0
+    a = _norm(a_text, value)
+    b = _norm(b_text, value)
+    sim = _ratio(a, b)
+    return sim >= _CROSS_MIN, sim
+
+
+class CrossSessionIdorDetector:
+    """Batch pass: replay each reference-param endpoint under a second user's session."""
+
+    name = "idor"
+    severity = "high"  # unauthorized cross-user data access outranks mere enumeration
+
+    async def detect_all(self, probes, http_a, http_b) -> list:
+        """Return [(probe, Candidate)] for endpoints where B could read A's object."""
+        found = []
+        for probe in probes:
+            for param in probe.testable_params:
+                value = probe.baseline.get(param, "")
+                if not value or not _is_reference_name(param):
+                    continue
+                try:
+                    a = await http_a.send(probe.method, probe.url, probe.baseline)
+                    b = await http_b.send(probe.method, probe.url, probe.baseline)
+                except Exception as e:
+                    logger.debug("Cross-session IDOR probe failed %s?%s: %s", probe.url, param, e)
+                    continue
+                if a.status != 200 or len(a.text) < _MIN_BODY:
+                    continue
+                hit, sim = cross_session_oracle(a.text, b.text, b.status, value)
+                if hit:
+                    found.append((probe, self._candidate(probe, param, value, sim,
+                                                          len(a.text), len(b.text))))
+                    break  # one candidate per endpoint is enough
+        return found
+
+    def _candidate(self, probe, param, value, sim, a_len, b_len) -> Candidate:
+        path = urlparse(probe.url).path or "/"
+        return Candidate(
+            type="idor",
+            severity=self.severity,
+            param=param,
+            payload=value,
+            title=f"Broken access control (cross-user) in '{param}' ({path})",
+            description=(
+                f"A second authenticated user requested {probe.method} {path} with another "
+                f"user's '{param}' value ('{value}') and received that user's object "
+                f"(response similarity {sim:.3f}, not an access-denied page). The endpoint "
+                f"does not check that the caller owns the requested object, so any logged-in "
+                f"user can read another's data. Verification re-runs both sessions to confirm "
+                f"the cross-user access is reproducible."
+            ),
+            remediation=CROSS_REMEDIATION,
+            technique="cross-session",
+            evidence=[
+                ("curl", build_curl(probe.method, probe.url, probe.baseline, auth_required=True)),
+                ("response",
+                 f"Cross-user access on '{param}':\n"
+                 f"  identifier (owned by user A): {value}\n"
+                 f"  user A's own response:  {a_len} bytes\n"
+                 f"  user B's response to A's id: {b_len} bytes, HTTP 200, not a denial\n"
+                 f"  A-vs-B similarity: {sim:.3f} (B received A's object)"),
             ],
         )

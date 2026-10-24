@@ -114,25 +114,40 @@ class VerifyStage:
 
     async def _verify_http(self, ctx: "ScanContext", sqli, idor):
         """SQLi and IDOR are pure-HTTP checks — verify over one APIRequestContext, no browser."""
-        temp_path = None
+        temps: list[str] = []
         async with async_playwright() as p:
             request_ctx, temp_path = await new_request_context(p, ctx.storage_state)
+            if temp_path:
+                temps.append(temp_path)
             http = DetectorHttp(request_ctx, ctx.limiter)
+
+            # A second user's session enables cross-session (two-user) IDOR proof.
+            http_b = None
+            ctx_b = None
+            if ctx.storage_state_b:
+                ctx_b, temp_b = await new_request_context(p, ctx.storage_state_b)
+                if temp_b:
+                    temps.append(temp_b)
+                http_b = DetectorHttp(ctx_b, ctx.limiter)
+
             try:
                 await self._verify_with(ctx, http, sqli, SqliVerifier())
                 if not self._stopped():
-                    await self._verify_with(ctx, http, idor, IdorVerifier())
+                    await self._verify_with(ctx, http, idor, IdorVerifier(), http_b=http_b)
             finally:
                 await request_ctx.dispose()
-                if temp_path:
+                if ctx_b is not None:
+                    await ctx_b.dispose()
+                for t in temps:
                     import os
                     try:
-                        os.unlink(temp_path)
+                        os.unlink(t)
                     except OSError:
                         pass
 
-    async def _verify_with(self, ctx: "ScanContext", http, items, verifier):
+    async def _verify_with(self, ctx: "ScanContext", http, items, verifier, http_b=None):
         """Run one HTTP verifier over its candidates (shared by SQLi and IDOR)."""
+        extra = {"http_b": http_b} if http_b is not None else {}
         for finding_id, endpoint, param in items:
             if self._stopped():
                 break
@@ -142,7 +157,7 @@ class VerifyStage:
             params_to_try = [param] if param in probe.baseline else probe.testable_params
             result = None
             for candidate_param in params_to_try:
-                result = await verifier.verify(http, probe, candidate_param)
+                result = await verifier.verify(http, probe, candidate_param, **extra)
                 if result.confirmed:
                     break
             await self._record(ctx, finding_id, result)
@@ -230,10 +245,9 @@ class VerifyStage:
                 proof = ("the database evaluated injected SQL — a TRUE vs FALSE "
                          "condition produced a deterministic, repeatable response split")
             elif finding.type == "idor":
-                proof = ("neighbouring object identifiers returned distinct, valid records "
-                         "with the same template while an out-of-range identifier was "
-                         "rejected — the reference selects records directly with no "
-                         "access-control check, deterministically on every repeat")
+                proof = ("an object was accessed without a valid authorisation check, "
+                         "reproduced deterministically on every repeat (see evidence for "
+                         "whether this was cross-user access or identifier enumeration)")
             else:
                 proof = "the payload executed in a real browser (callback fired)"
             finding.description = (

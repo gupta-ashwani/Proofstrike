@@ -75,8 +75,10 @@ class ScanContext:
     scope: DomainScope
     use_sitemap: bool
     verify_post: bool
+    auth_config_b: dict | None = None  # optional SECOND user (for cross-session IDOR)
     stats: dict = field(default_factory=dict)
-    storage_state: dict | None = None  # authenticated Playwright session (in memory only)
+    storage_state: dict | None = None    # authenticated Playwright session (in memory only)
+    storage_state_b: dict | None = None  # second user's session (in memory only)
 
     @property
     def authenticated(self) -> bool:
@@ -98,12 +100,24 @@ class ScanContext:
         else:
             auth_config = None
 
+        # Optional second user for cross-session IDOR: reuses the same login form/selectors,
+        # just different credentials. Configured as auth_config["second_user"] = {username, password}.
+        auth_config_b = None
+        if auth_config:
+            second = auth_config.get("second_user")
+            if isinstance(second, dict) and second.get("username") and second.get("password"):
+                auth_config_b = {**auth_config, "username": second["username"],
+                                 "password": second["password"]}
+                auth_config_b.pop("second_user", None)
+
         secret_values = set()
         if auth_config:
             secret_values.add(str(auth_config.get("password", "")))
             for user in auth_config.get("users") or []:
                 if isinstance(user, dict) and user.get("password"):
                     secret_values.add(str(user["password"]))
+            if auth_config_b:
+                secret_values.add(str(auth_config_b.get("password", "")))
             secret_values.discard("")
 
         detectors = config.get("detectors")
@@ -124,6 +138,7 @@ class ScanContext:
             max_pages=_int(config, ("max_pages", "request_budget"), DEFAULT_MAX_PAGES, minimum=1),
             detectors=[str(d).lower() for d in detectors],
             auth_config=auth_config,
+            auth_config_b=auth_config_b,
             secret_values=secret_values,
             limiter=RateLimiter(
                 delay=_float(config, "request_delay", DEFAULT_REQUEST_DELAY, minimum=0.0),

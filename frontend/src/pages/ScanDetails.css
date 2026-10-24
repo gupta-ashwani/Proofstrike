@@ -206,3 +206,20 @@
 @media (max-width: 768px) {
   .telemetry-bar { grid-template-columns: 1fr; }
 }
+
+/* Export report dropdown */
+.export-menu-wrap { position: relative; }
+.export-backdrop { position: fixed; inset: 0; z-index: 40; }
+.export-menu {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 50;
+  min-width: 180px; display: flex; flex-direction: column;
+  background: var(--bg-elevated); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg); padding: var(--space-xs);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.45);
+}
+.export-menu button {
+  text-align: left; background: transparent; border: none; cursor: pointer;
+  color: var(--text-secondary); padding: var(--space-sm, 8px) var(--space-md);
+  border-radius: var(--radius-sm); font: inherit; transition: var(--transition-base);
+}
+.export-menu button:hover { background: var(--accent-primary-dim); color: var(--text-primary); }

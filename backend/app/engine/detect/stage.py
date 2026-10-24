@@ -14,7 +14,7 @@ from sqlalchemy import select
 from app.engine.detect.base import DetectorHttp, EndpointProbe
 from app.engine.detect.xss import XssDetector
 from app.engine.detect.sqli import SqliDetector
-from app.engine.detect.idor import IdorDetector
+from app.engine.detect.idor import IdorDetector, CrossSessionIdorDetector
 from app.engine.detect.stored_xss import StoredXssDetector
 from app.models.endpoint import Endpoint
 from app.models.finding import Finding, FindingStatus
@@ -112,6 +112,32 @@ class DetectStage:
                     except Exception as e:
                         logger.debug("Stored XSS detector failed: %s", e)
                         pairs = []
+                    for probe, candidate in pairs:
+                        key = (probe.id, candidate.param, candidate.type)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        await self._store(ctx, probe, candidate)
+                        candidates_found += 1
+
+                # Cross-session IDOR: replay each object-reference endpoint under a
+                # second user's session (needs auth + a captured User-B session).
+                if "idor" in ctx.detectors and ctx.storage_state_b and not self._stopped():
+                    ctx_b, temp_b = await new_request_context(p, ctx.storage_state_b)
+                    http_b = DetectorHttp(ctx_b, ctx.limiter)
+                    try:
+                        pairs = await CrossSessionIdorDetector().detect_all(probes, http, http_b)
+                    except Exception as e:
+                        logger.debug("Cross-session IDOR detector failed: %s", e)
+                        pairs = []
+                    finally:
+                        await ctx_b.dispose()
+                        if temp_b:
+                            import os
+                            try:
+                                os.unlink(temp_b)
+                            except OSError:
+                                pass
                     for probe, candidate in pairs:
                         key = (probe.id, candidate.param, candidate.type)
                         if key in seen:

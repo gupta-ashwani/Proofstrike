@@ -22,7 +22,9 @@ from app.engine.detect.base import DetectorHttp, EndpointProbe
 from app.engine.detect.idor import (
     _absent,
     _is_reference,
+    _is_reference_name,
     _neighbors,
+    cross_session_oracle,
     idor_oracle,
     _MIN_BODY,
 )
@@ -35,7 +37,15 @@ DEFAULT_REPEATS = 3
 
 class IdorVerifier:
     async def verify(self, http: DetectorHttp, probe: EndpointProbe, param: str,
-                     repeats: int = DEFAULT_REPEATS) -> VerifyResult:
+                     repeats: int = DEFAULT_REPEATS,
+                     http_b: DetectorHttp | None = None) -> VerifyResult:
+        # Cross-session (two-user) proof is the strongest IDOR evidence — try it first
+        # whenever a second authenticated session is available.
+        if http_b is not None and _is_reference_name(param):
+            cross = await self._verify_cross_session(http, http_b, probe, param, repeats)
+            if cross is not None:
+                return cross
+
         value = probe.baseline.get(param, "")
         if not _is_reference(param, value):
             return VerifyResult(False, attempted=True,
@@ -91,3 +101,34 @@ class IdorVerifier:
             False, attempted=True,
             note="object enumeration did not reproduce deterministically under verification",
         )
+
+    async def _verify_cross_session(self, http_a, http_b, probe, param,
+                                    repeats) -> VerifyResult | None:
+        """Confirm two-user IDOR: B must receive A's object on every repeat."""
+        value = probe.baseline.get(param, "")
+        if not value:
+            return None
+        last_sim = None
+        for _ in range(repeats):
+            try:
+                a = await http_a.send(probe.method, probe.url, probe.baseline)
+                b = await http_b.send(probe.method, probe.url, probe.baseline)
+            except Exception:
+                return None
+            if a.status != 200 or len(a.text) < _MIN_BODY:
+                return None
+            hit, sim = cross_session_oracle(a.text, b.text, b.status, value)
+            if not hit:
+                return None
+            last_sim = sim
+        detail = (
+            f"Deterministic cross-user access over {repeats} repeats:\n"
+            f"  identifier owned by user A: {value}\n"
+            f"  user B (own session) requested A's identifier and received A's object every time\n"
+            f"  A-vs-B response similarity: {last_sim:.3f} (>= {0.90}), B's response was not a denial\n"
+            f"  => the endpoint performs no ownership check"
+        )
+        req = (f"{probe.method} {probe.url}  (param '{param}', value '{value}')\n"
+               f"sent once with user A's session and once with user B's session")
+        return VerifyResult(True, attempted=True, payload=value,
+                            url=probe.url, request_desc=req, dom_snippet=detail)
