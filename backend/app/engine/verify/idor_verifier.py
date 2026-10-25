@@ -108,27 +108,57 @@ class IdorVerifier:
         value = probe.baseline.get(param, "")
         if not value:
             return None
+        detail_head = (
+            f"Deterministic cross-user access over {repeats} repeats:\n"
+            f"  identifier owned by user A: {value}\n"
+            f"  user B (own session) requested A's identifier and received A's object every time"
+        )
+        return await self._cross_confirm(http_a, http_b, probe, value, repeats,
+                                         detail_head, "the endpoint performs no ownership check")
+
+    async def verify_access(self, http_owner, attackers: list, probe: EndpointProbe,
+                            param: str = "", repeats: int = DEFAULT_REPEATS) -> VerifyResult:
+        """
+        Confirm a function-level access-control flaw: a session that should have NO
+        access (anonymous, or a lower-privilege user) still receives the protected
+        content. Tries each attacker session; the first that reproduces confirms it.
+        """
+        strip_value = probe.baseline.get(param, "")
+        for attacker in attackers:
+            if attacker is None:
+                continue
+            head = (f"Deterministic unauthorized access over {repeats} repeats:\n"
+                    f"  an attacker session (no/low privilege) requested {probe.method} "
+                    f"{probe.url}\n  and received the protected content every time")
+            result = await self._cross_confirm(http_owner, attacker, probe, strip_value,
+                                               repeats, head, "the endpoint enforces no "
+                                               "server-side authorization check")
+            if result is not None:
+                return result
+        return VerifyResult(False, attempted=True,
+                            note="the unauthorized session did not reproducibly reach the "
+                                 "protected content under verification")
+
+    async def _cross_confirm(self, http_owner, http_attacker, probe, strip_value,
+                             repeats, detail_head, conclusion) -> VerifyResult | None:
+        """Shared loop: attacker must receive owner's content on every repeat."""
         last_sim = None
         for _ in range(repeats):
             try:
-                a = await http_a.send(probe.method, probe.url, probe.baseline)
-                b = await http_b.send(probe.method, probe.url, probe.baseline)
+                owner = await http_owner.send(probe.method, probe.url, probe.baseline)
+                atk = await http_attacker.send(probe.method, probe.url, probe.baseline)
             except Exception:
                 return None
-            if a.status != 200 or len(a.text) < _MIN_BODY:
+            if owner.status != 200 or len(owner.text) < _MIN_BODY:
                 return None
-            hit, sim = cross_session_oracle(a.text, b.text, b.status, value)
+            hit, sim = cross_session_oracle(owner.text, atk.text, atk.status, strip_value)
             if not hit:
                 return None
             last_sim = sim
-        detail = (
-            f"Deterministic cross-user access over {repeats} repeats:\n"
-            f"  identifier owned by user A: {value}\n"
-            f"  user B (own session) requested A's identifier and received A's object every time\n"
-            f"  A-vs-B response similarity: {last_sim:.3f} (>= {0.90}), B's response was not a denial\n"
-            f"  => the endpoint performs no ownership check"
-        )
-        req = (f"{probe.method} {probe.url}  (param '{param}', value '{value}')\n"
-               f"sent once with user A's session and once with user B's session")
-        return VerifyResult(True, attempted=True, payload=value,
+        detail = (f"{detail_head}\n"
+                  f"  owner-vs-attacker response similarity: {last_sim:.3f} (>= 0.90), "
+                  f"not a denial page\n  => {conclusion}")
+        req = (f"{probe.method} {probe.url}\n"
+               f"sent once with the authorized session and once with the unauthorized session")
+        return VerifyResult(True, attempted=True, payload=strip_value or "(endpoint access)",
                             url=probe.url, request_desc=req, dom_snippet=detail)

@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db
-from app.models.finding import Finding
+from app.models.finding import Finding, FindingStatus, Severity
 from app.models.evidence import Evidence
 from app.schemas.finding import (
     FindingResponse,
@@ -117,8 +117,20 @@ async def update_finding(
         raise HTTPException(status_code=404, detail="Finding not found")
 
     if payload.status is not None:
+        allowed = {s.value for s in FindingStatus}
+        if payload.status not in allowed:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid status '{payload.status}'. Allowed: {sorted(allowed)}",
+            )
         finding.status = payload.status
     if payload.severity is not None:
+        allowed_sev = {s.value for s in Severity}
+        if payload.severity not in allowed_sev:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid severity '{payload.severity}'. Allowed: {sorted(allowed_sev)}",
+            )
         finding.severity = payload.severity
 
     await db.flush()

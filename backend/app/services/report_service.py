@@ -300,7 +300,7 @@ def render_pdf(html_doc: str) -> bytes:
     loop = asyncio.ProactorEventLoop() if sys.platform == "win32" else asyncio.new_event_loop()
     try:
         asyncio.set_event_loop(loop)
-        return loop.run_until_complete(_html_to_pdf(html_doc))
+        return loop.run_until_complete(render_pdf_async(html_doc))
     finally:
         try:
             loop.run_until_complete(loop.shutdown_asyncgens())
@@ -309,7 +309,10 @@ def render_pdf(html_doc: str) -> bytes:
             asyncio.set_event_loop(None)
 
 
-async def _html_to_pdf(html_doc: str) -> bytes:
+async def render_pdf_async(html_doc: str) -> bytes:
+    """Render HTML to PDF with headless Chromium. Call this directly from code that
+    is already on a subprocess-capable loop (e.g. the CLI); the sync `render_pdf`
+    wrapper is for the API server, which is on a non-subprocess loop."""
     from playwright.async_api import async_playwright
 
     async with async_playwright() as p:

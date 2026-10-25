@@ -56,12 +56,17 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
         )
     ).scalar() or 0
 
-    # Severity breakdown (all findings, not just confirmed)
+    # Severity breakdown — CONFIRMED findings only. The dashboard's risk picture must
+    # reflect proven issues, not candidates still awaiting verification or ones already
+    # rejected as false positives (that would inflate the headline numbers).
     severity_counts = {}
     for sev in Severity:
         count = (
             await db.execute(
-                select(func.count()).where(Finding.severity == sev.value)
+                select(func.count()).where(
+                    Finding.severity == sev.value,
+                    Finding.status == FindingStatus.CONFIRMED.value,
+                )
             )
         ).scalar() or 0
         severity_counts[sev.value] = count

@@ -14,7 +14,8 @@ from sqlalchemy import select
 from app.engine.detect.base import DetectorHttp, EndpointProbe
 from app.engine.detect.xss import XssDetector
 from app.engine.detect.sqli import SqliDetector
-from app.engine.detect.idor import IdorDetector, CrossSessionIdorDetector
+from app.engine.detect.idor import IdorDetector, CrossSessionIdorDetector, AccessControlDetector
+from app.engine.detect.passive import PassiveScanner
 from app.engine.detect.stored_xss import StoredXssDetector
 from app.models.endpoint import Endpoint
 from app.models.finding import Finding, FindingStatus
@@ -25,8 +26,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("proofstrike.detect.stage")
 
-# Detectors implemented so far.
+# Per-probe detectors. (Others run as batch passes: stored XSS under "xss",
+# cross-session/access-control under "idor", and "passive".)
 AVAILABLE = {"xss": XssDetector, "sqli": SqliDetector, "idor": IdorDetector}
+_BATCH_ONLY = {"passive"}  # selected names handled by a batch pass, not a per-probe detector
 
 
 async def new_request_context(playwright, storage_state):
@@ -64,10 +67,11 @@ class DetectStage:
         ctx.stats["detect_session"] = "authenticated" if ctx.storage_state else "anonymous"
 
         detectors = [AVAILABLE[name]() for name in ctx.detectors if name in AVAILABLE]
-        skipped = [name for name in ctx.detectors if name not in AVAILABLE]
+        skipped = [n for n in ctx.detectors if n not in AVAILABLE and n not in _BATCH_ONLY]
         if skipped:
             logger.info("Detectors not implemented yet, skipped: %s", skipped)
-        if not detectors:
+        run_passive = "passive" in ctx.detectors
+        if not detectors and not run_passive:
             logger.info("Detect stage: no implemented detectors selected")
             ctx.stats.setdefault("candidates_found", 0)
             return
@@ -120,24 +124,60 @@ class DetectStage:
                         await self._store(ctx, probe, candidate)
                         candidates_found += 1
 
-                # Cross-session IDOR: replay each object-reference endpoint under a
-                # second user's session (needs auth + a captured User-B session).
-                if "idor" in ctx.detectors and ctx.storage_state_b and not self._stopped():
-                    ctx_b, temp_b = await new_request_context(p, ctx.storage_state_b)
-                    http_b = DetectorHttp(ctx_b, ctx.limiter)
+                # Session-based access control (needs an authenticated crawl session):
+                #   - cross-session IDOR   (object owned by A, read by user B)
+                #   - unauthenticated access (protected endpoint read with no session)
+                #   - privilege escalation (privileged endpoint read by a lower user)
+                if "idor" in ctx.detectors and ctx.storage_state and not self._stopped():
+                    ctx_anon = ctx_b = None
+                    http_b = None
+                    temps: list[str] = []
+                    access_pairs = []
                     try:
-                        pairs = await CrossSessionIdorDetector().detect_all(probes, http, http_b)
+                        anon_ctx, temp_anon = await new_request_context(p, None)
+                        ctx_anon = anon_ctx
+                        if temp_anon:
+                            temps.append(temp_anon)
+                        http_anon = DetectorHttp(ctx_anon, ctx.limiter)
+                        if ctx.storage_state_b:
+                            ctx_b, temp_b = await new_request_context(p, ctx.storage_state_b)
+                            if temp_b:
+                                temps.append(temp_b)
+                            http_b = DetectorHttp(ctx_b, ctx.limiter)
+                            access_pairs += await CrossSessionIdorDetector().detect_all(
+                                probes, http, http_b)
+                        access_pairs += await AccessControlDetector().detect_all(
+                            probes, http, http_anon, http_b)
                     except Exception as e:
-                        logger.debug("Cross-session IDOR detector failed: %s", e)
-                        pairs = []
+                        logger.debug("Access-control detectors failed: %s", e)
+                        access_pairs = []
                     finally:
-                        await ctx_b.dispose()
-                        if temp_b:
+                        if ctx_anon is not None:
+                            await ctx_anon.dispose()
+                        if ctx_b is not None:
+                            await ctx_b.dispose()
+                        for t in temps:
                             import os
                             try:
-                                os.unlink(temp_b)
+                                os.unlink(t)
                             except OSError:
                                 pass
+                    for probe, candidate in access_pairs:
+                        key = (probe.id, candidate.param, candidate.type)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        await self._store(ctx, probe, candidate)
+                        candidates_found += 1
+
+                # Passive checks: security headers, cookie flags, info disclosure,
+                # open redirect — read off normal responses.
+                if run_passive and not self._stopped():
+                    try:
+                        pairs = await PassiveScanner().scan_all(probes, http)
+                    except Exception as e:
+                        logger.debug("Passive scanner failed: %s", e)
+                        pairs = []
                     for probe, candidate in pairs:
                         key = (probe.id, candidate.param, candidate.type)
                         if key in seen:
@@ -221,6 +261,14 @@ class DetectStage:
                 f"1. Send the request below with '{candidate.param}' set to the payload.\n"
                 f"2. Open {sink} and observe the payload rendered un-encoded (it was stored).\n\n"
                 f"Payload: {candidate.payload}"
+            )
+        if candidate.type == "auth_bypass":
+            return (
+                "1. Send the request below WITHOUT a valid session (log out / use a fresh "
+                "browser), or as a lower-privilege user.\n"
+                "2. Observe the protected content is returned anyway — the server performs "
+                "no authentication/authorization check for this endpoint.\n\n"
+                f"Technique: {candidate.technique}"
             )
         if candidate.type == "idor":
             return (

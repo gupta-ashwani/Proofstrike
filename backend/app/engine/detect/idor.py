@@ -333,3 +333,113 @@ class CrossSessionIdorDetector:
                  f"  A-vs-B similarity: {sim:.3f} (B received A's object)"),
             ],
         )
+
+
+# ── function-level access control: missing auth + privilege escalation ───────
+# Same engine as cross-session IDOR, but the "attacker" is a session that should
+# have NO access to the endpoint at all:
+#   - anonymous  → the endpoint requires login yet serves content without a session
+#                  (missing authentication / auth bypass)
+#   - lower-priv → a privileged-looking endpoint serves its content to an ordinary
+#                  user (broken function-level authorization / privilege escalation)
+
+_PRIVILEGED_HINTS = (
+    "admin", "manage", "internal", "console", "staff", "superuser",
+    "/config", "/settings", "/root", "/mod", "privileged",
+)
+
+ACCESS_REMEDIATION = (
+    "Enforce authentication and role/permission checks server-side on every request, "
+    "including APIs and XHR endpoints — not just the HTML pages that link to them. Deny "
+    "by default and verify the caller's identity and role before returning data."
+)
+
+
+def _looks_privileged(url: str) -> bool:
+    path = (urlparse(url).path or "").lower()
+    return any(h in path for h in _PRIVILEGED_HINTS)
+
+
+def access_oracle(owner_text: str, owner_status: int,
+                  attacker_text: str, attacker_status: int) -> tuple[bool, float]:
+    """Owner must return real content; attacker (who shouldn't) must get ~the same page."""
+    if owner_status != 200 or len(owner_text) < _MIN_BODY:
+        return False, 0.0
+    return cross_session_oracle(owner_text, attacker_text, attacker_status, "")
+
+
+class AccessControlDetector:
+    """Batch pass: can a no-access session reach a protected endpoint's content?"""
+
+    name = "auth_bypass"
+
+    async def detect_all(self, probes, http_auth, http_anon=None, http_b=None) -> list:
+        found = []
+        for probe in probes:
+            try:
+                owner = await http_auth.send(probe.method, probe.url, probe.baseline)
+            except Exception as e:
+                logger.debug("Access-control owner fetch failed %s: %s", probe.url, e)
+                continue
+            if owner.status != 200 or len(owner.text) < _MIN_BODY:
+                continue
+
+            # 1) Missing authentication: endpoint needs a login, anon still reads it.
+            if probe.auth_required and http_anon is not None:
+                try:
+                    anon = await http_anon.send(probe.method, probe.url, probe.baseline)
+                except Exception:
+                    anon = None
+                if anon is not None:
+                    hit, sim = access_oracle(owner.text, owner.status, anon.text, anon.status)
+                    if hit:
+                        found.append((probe, self._candidate(
+                            probe, kind="unauthenticated-access", sim=sim,
+                            title=f"Missing authentication (unauthenticated access) "
+                                  f"({urlparse(probe.url).path or '/'})",
+                            detail=("This endpoint was reached behind login during the "
+                                    "authenticated crawl, yet an anonymous request (no "
+                                    "session) returned the same protected content "
+                                    f"(similarity {sim:.3f}).")))
+                        )
+                        continue  # already an auth bypass; no need to also test priv-esc
+
+            # 2) Privilege escalation: privileged-looking endpoint served to a lower user.
+            if http_b is not None and _looks_privileged(probe.url):
+                try:
+                    b = await http_b.send(probe.method, probe.url, probe.baseline)
+                except Exception:
+                    b = None
+                if b is not None:
+                    hit, sim = access_oracle(owner.text, owner.status, b.text, b.status)
+                    if hit:
+                        found.append((probe, self._candidate(
+                            probe, kind="privilege-escalation", sim=sim,
+                            title=f"Broken function-level authorization "
+                                  f"({urlparse(probe.url).path or '/'})",
+                            detail=("This privileged-looking endpoint returned its content "
+                                    "to a second, lower-privilege user session "
+                                    f"(similarity {sim:.3f}) — no role/permission check.")))
+                        )
+        return found
+
+    def _candidate(self, probe, *, kind, sim, title, detail) -> Candidate:
+        return Candidate(
+            type="auth_bypass",
+            severity="high",
+            param="",
+            payload="(no payload — the request itself is unauthorized)",
+            title=title,
+            description=(f"{detail} Verification re-issues the request from the "
+                         f"unauthorized session to confirm the access is reproducible."),
+            remediation=ACCESS_REMEDIATION,
+            technique=kind,
+            evidence=[
+                ("curl", build_curl(probe.method, probe.url, probe.baseline, auth_required=False)),
+                ("response",
+                 f"Access-control check ({kind}):\n"
+                 f"  endpoint: {probe.method} {probe.url}\n"
+                 f"  an unauthorized session received the protected content "
+                 f"(similarity {sim:.3f}, HTTP 200, not a denial page)"),
+            ],
+        )

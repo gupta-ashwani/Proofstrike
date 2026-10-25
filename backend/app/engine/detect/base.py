@@ -90,7 +90,8 @@ class DetectorHttp:
         self._req = request_context
         self._limiter = limiter
 
-    async def send(self, method: str, url: str, params: dict | None) -> HttpResponse:
+    async def send(self, method: str, url: str, params: dict | None,
+                   max_redirects: int = 5) -> HttpResponse:
         is_body = method.upper() not in ("GET", "HEAD", "DELETE")
         async with self._limiter:
             start = time.monotonic()
@@ -99,7 +100,7 @@ class DetectorHttp:
                 method=method,
                 params=None if is_body else (params or None),
                 form=(params or None) if is_body else None,
-                max_redirects=5,
+                max_redirects=max_redirects,
                 timeout=20_000,
             )
             text = await resp.text()

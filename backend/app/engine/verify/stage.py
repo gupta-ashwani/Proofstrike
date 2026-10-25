@@ -21,6 +21,7 @@ from app.engine.detect.stored_xss import SINK_EVIDENCE_TYPE
 from app.engine.verify.xss_verifier import XssVerifier
 from app.engine.verify.sqli_verifier import SqliVerifier
 from app.engine.verify.idor_verifier import IdorVerifier
+from app.engine.verify.passive_verifier import PassiveVerifier
 from app.models.endpoint import Endpoint
 from app.models.finding import Finding, FindingStatus
 from app.models.evidence import Evidence
@@ -48,18 +49,25 @@ class VerifyStage:
         stored = await self._load_stored_candidates(ctx)
         sqli = await self._load_candidates(ctx, "sqli")
         idor = await self._load_candidates(ctx, "idor")
-        if not reflected and not stored and not sqli and not idor:
+        authbypass = await self._load_candidates(ctx, "auth_bypass")
+        passive = {t: await self._load_candidates(ctx, t)
+                   for t in ("security_headers", "insecure_cookie", "info_disclosure", "open_redirect")}
+        has_passive = any(passive.values())
+        http_work = sqli or idor or authbypass or has_passive
+        if not reflected and not stored and not http_work:
             ctx.stats.setdefault("confirmed_findings", 0)
             return
 
-        logger.info("Verify stage: %d reflected + %d stored XSS + %d SQLi + %d IDOR candidate(s)",
-                    len(reflected), len(stored), len(sqli), len(idor))
+        logger.info("Verify stage: %d reflected + %d stored XSS + %d SQLi + %d IDOR + "
+                    "%d access-control + %d passive candidate(s)",
+                    len(reflected), len(stored), len(sqli), len(idor), len(authbypass),
+                    sum(len(v) for v in passive.values()))
         self._counts = {"confirmed": 0, "rejected": 0, "unverified": 0}
 
         if reflected or stored:
             await self._verify_xss(ctx, reflected, stored)
-        if (sqli or idor) and not self._stopped():
-            await self._verify_http(ctx, sqli, idor)
+        if http_work and not self._stopped():
+            await self._verify_http(ctx, sqli, idor, authbypass, passive)
 
         confirmed = self._counts["confirmed"]
         rejected = self._counts["rejected"]
@@ -112,38 +120,76 @@ class VerifyStage:
                         break
                 await self._record(ctx, finding_id, result)
 
-    async def _verify_http(self, ctx: "ScanContext", sqli, idor):
-        """SQLi and IDOR are pure-HTTP checks — verify over one APIRequestContext, no browser."""
+    async def _verify_http(self, ctx: "ScanContext", sqli, idor, authbypass, passive):
+        """SQLi, IDOR, access-control and passive are pure-HTTP checks — one browser, no page."""
         temps: list[str] = []
+        ctx_b = ctx_anon = None
         async with async_playwright() as p:
             request_ctx, temp_path = await new_request_context(p, ctx.storage_state)
             if temp_path:
                 temps.append(temp_path)
             http = DetectorHttp(request_ctx, ctx.limiter)
 
-            # A second user's session enables cross-session (two-user) IDOR proof.
-            http_b = None
-            ctx_b = None
+            # A second user's session enables cross-session IDOR + privilege escalation;
+            # an anonymous session enables the unauthenticated-access check.
+            http_b = http_anon = None
             if ctx.storage_state_b:
                 ctx_b, temp_b = await new_request_context(p, ctx.storage_state_b)
                 if temp_b:
                     temps.append(temp_b)
                 http_b = DetectorHttp(ctx_b, ctx.limiter)
+            if authbypass:
+                ctx_anon, temp_anon = await new_request_context(p, None)
+                if temp_anon:
+                    temps.append(temp_anon)
+                http_anon = DetectorHttp(ctx_anon, ctx.limiter)
 
             try:
                 await self._verify_with(ctx, http, sqli, SqliVerifier())
-                if not self._stopped():
+                if idor and not self._stopped():
                     await self._verify_with(ctx, http, idor, IdorVerifier(), http_b=http_b)
+                if authbypass and not self._stopped():
+                    await self._verify_access(ctx, http, authbypass, http_anon, http_b)
+                for ftype, items in passive.items():
+                    if items and not self._stopped():
+                        await self._verify_passive(ctx, http, ftype, items)
             finally:
                 await request_ctx.dispose()
                 if ctx_b is not None:
                     await ctx_b.dispose()
+                if ctx_anon is not None:
+                    await ctx_anon.dispose()
                 for t in temps:
                     import os
                     try:
                         os.unlink(t)
                     except OSError:
                         pass
+
+    async def _verify_access(self, ctx: "ScanContext", http, items, http_anon, http_b):
+        """Confirm access-control findings: an unauthorized session reaches the content."""
+        verifier = IdorVerifier()
+        attackers = [h for h in (http_anon, http_b) if h is not None]
+        for finding_id, endpoint, param in items:
+            if self._stopped():
+                break
+            if ctx.excluder.is_excluded(endpoint.url):
+                continue
+            probe = EndpointProbe.from_endpoint(endpoint)
+            result = await verifier.verify_access(http, attackers, probe, param)
+            await self._record(ctx, finding_id, result)
+
+    async def _verify_passive(self, ctx: "ScanContext", http, ftype, items):
+        """Re-check a passive finding (the param carries the issue key, e.g. header name)."""
+        verifier = PassiveVerifier(ftype)
+        for finding_id, endpoint, param in items:
+            if self._stopped():
+                break
+            if ctx.excluder.is_excluded(endpoint.url):
+                continue
+            probe = EndpointProbe.from_endpoint(endpoint)
+            result = await verifier.verify(http, probe, param)
+            await self._record(ctx, finding_id, result)
 
     async def _verify_with(self, ctx: "ScanContext", http, items, verifier, http_b=None):
         """Run one HTTP verifier over its candidates (shared by SQLi and IDOR)."""
@@ -248,6 +294,10 @@ class VerifyStage:
                 proof = ("an object was accessed without a valid authorisation check, "
                          "reproduced deterministically on every repeat (see evidence for "
                          "whether this was cross-user access or identifier enumeration)")
+            elif finding.type == "auth_bypass":
+                proof = ("a session with no right to the endpoint (anonymous or a "
+                         "lower-privilege user) retrieved the protected content, "
+                         "reproduced deterministically on every repeat")
             else:
                 proof = "the payload executed in a real browser (callback fired)"
             finding.description = (
