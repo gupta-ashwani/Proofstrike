@@ -10,6 +10,7 @@ Handles:
 
 import asyncio
 import logging
+import os
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
@@ -18,6 +19,15 @@ from playwright.async_api import (
 )
 
 logger = logging.getLogger("proofstrike.crawler.browser")
+
+
+def chromium_launch_args() -> list[str]:
+    """Extra Chromium flags. In a container the browser runs as root and refuses to
+    start without --no-sandbox; --disable-dev-shm-usage avoids crashes on a small
+    /dev/shm. Gated on an env var so local (non-Docker) runs are unaffected."""
+    if os.getenv("PROOFSTRIKE_BROWSER_NO_SANDBOX", "").lower() in ("1", "true", "yes"):
+        return ["--no-sandbox", "--disable-dev-shm-usage"]
+    return []
 
 
 @dataclass
@@ -72,7 +82,8 @@ class BrowserManager:
         """Launch Chromium browser and create a context."""
         logger.info("Launching Playwright Chromium (headless=%s)", self.headless)
         self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.launch(headless=self.headless)
+        self._browser = await self._playwright.chromium.launch(
+            headless=self.headless, args=chromium_launch_args())
         context_args = dict(
             viewport={"width": self.viewport_width, "height": self.viewport_height},
             ignore_https_errors=True,

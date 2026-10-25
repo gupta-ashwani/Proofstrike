@@ -314,9 +314,10 @@ async def render_pdf_async(html_doc: str) -> bytes:
     is already on a subprocess-capable loop (e.g. the CLI); the sync `render_pdf`
     wrapper is for the API server, which is on a non-subprocess loop."""
     from playwright.async_api import async_playwright
+    from app.engine.crawler.browser import chromium_launch_args
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(headless=True, args=chromium_launch_args())
         try:
             page = await browser.new_page()
             await page.set_content(html_doc, wait_until="networkidle")

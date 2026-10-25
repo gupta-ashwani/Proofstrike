@@ -1,0 +1,26 @@
+# Keep the build context small and the image clean.
+venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local runtime artifacts — never bake these into the image.
+*.db
+*.sqlite
+*.sqlite3
+proofstrike.db
+evidence/
+reports/
+proofstrike-reports/
+
+# Env / editor
+.env
+.env.*
+.vscode/
+.idea/
+Dockerfile
+.dockerignore

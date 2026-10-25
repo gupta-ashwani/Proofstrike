@@ -1,0 +1,32 @@
+# ProofStrike — full stack in one command:
+#
+#   docker compose up --build
+#     dashboard -> http://localhost:5173    API/docs -> http://localhost:8000/docs
+#
+# Run a headless CLI scan in the backend image (results land in the shared volume):
+#   docker compose run --rm backend \
+#     python -m proofstrike scan https://target.example --fail-on high --report-dir /data/reports
+
+services:
+  backend:
+    build:
+      context: ./backend
+    image: proofstrike-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - proofstrike-data:/data   # SQLite DB + reports + evidence persist here
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    image: proofstrike-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  proofstrike-data:
