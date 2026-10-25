@@ -19,6 +19,7 @@ outcome is confirmed (deterministic) or rejected (not reproducible).
 from __future__ import annotations
 
 import logging
+import secrets
 from urllib.parse import urlencode
 
 from app.engine.detect.base import DetectorHttp, EndpointProbe
@@ -26,6 +27,7 @@ from app.engine.detect.payloads import (
     sqli_boolean_pairs,
     sqli_error_payloads,
     sqli_time_payloads,
+    sqli_union_payloads,
 )
 from app.engine.detect.sqli import boolean_oracle, find_error_signature
 from app.engine.verify.xss_verifier import VerifyResult
@@ -58,12 +60,36 @@ class SqliVerifier:
             or await self._verify_time(http, probe, param, value, base)
         )
         if result:
+            # Upgrade the evidence: if a UNION SELECT can place attacker-chosen data in
+            # the response, data exfiltration is proven (the strongest SQLi evidence).
+            exfil = await self._try_union_exfil(http, probe, param, value)
+            if exfil:
+                label, payload, marker = exfil
+                result.dom_snippet = (result.dom_snippet or "") + (
+                    f"\n\nDATA EXFILTRATION CONFIRMED via UNION SELECT ({label}): the "
+                    f"database returned attacker-chosen data (marker '{marker}') that was "
+                    f"not present in the request, so arbitrary columns/tables can be read.\n"
+                    f"  payload: {payload}"
+                )
             return result
         return VerifyResult(
             False, attempted=True,
             note="no SQLi technique (boolean/error/time) reproduced deterministically "
                  "under verification",
         )
+
+    async def _try_union_exfil(self, http, probe, param, value):
+        """Attempt a UNION SELECT that returns a DB-concatenated marker. If the joined
+        marker surfaces (it is never in the request), exfiltration is proven."""
+        token = "psqliux" + secrets.token_hex(4)
+        for label, payload, marker in sqli_union_payloads(value, token):
+            try:
+                r = await http.send(probe.method, probe.url, probe.inject(param, payload))
+            except Exception:
+                continue
+            if marker in r.text:   # the joined marker only exists if the DB built it
+                return label, payload, marker
+        return None
 
     # ── boolean ────────────────────────────────────────────────────────────
     async def _verify_boolean(self, http, probe, param, value, base, repeats) -> VerifyResult | None:

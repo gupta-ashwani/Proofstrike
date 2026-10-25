@@ -106,6 +106,51 @@ def _strip_query(url: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
 
 
+def _numeric_path_value(url: str) -> str | None:
+    """First numeric path segment, e.g. /users/1/profile -> '1' (for path-based IDOR)."""
+    for seg in (urlparse(url).path or "").split("/"):
+        if seg.isdigit():
+            return seg
+    return None
+
+
+# Script-embedded API call patterns. A verb-bearing call (axios.post, $.delete,
+# client.put, …) carries its method; bare path literals and fetch() default to GET.
+_SCRIPT_VERB_RE = re.compile(
+    r"""(?:axios|\$|[\w.]+)\.(get|post|put|delete|patch)\(\s*['"]([^'"]+)['"]""",
+    re.IGNORECASE,
+)
+_SCRIPT_GET_RES = [
+    re.compile(r"""['"](/api/[^'"\s]+)['"]"""),
+    re.compile(r"""['"](/v[0-9]+/[^'"\s]+)['"]"""),
+    re.compile(r"""fetch\(\s*['"]([^'"]+)['"]"""),
+]
+
+
+def extract_script_calls(text: str) -> list[tuple[str, str]]:
+    """Return [(url, method)] for API calls referenced in a script body, verb inferred.
+
+    A verb-bearing call (axios.post, $.delete, …) wins; a bare path/fetch reference to
+    a URL already seen with a verb does not also emit a redundant GET for it.
+    """
+    text = text or ""
+    verbed: dict[str, str] = {}
+    for m in _SCRIPT_VERB_RE.finditer(text):
+        url, method = m.group(2), m.group(1).upper()
+        if url:
+            verbed.setdefault(url, method)
+
+    out: list[tuple[str, str]] = [(u, m) for u, m in verbed.items()]
+    seen_get: set[str] = set(verbed)
+    for pat in _SCRIPT_GET_RES:
+        for m in pat.finditer(text):
+            url = m.group(1)
+            if url and url not in seen_get:
+                seen_get.add(url)
+                out.append((url, "GET"))
+    return out
+
+
 class EndpointExtractor:
     """
     Extracts endpoints from both the DOM and intercepted network traffic.
@@ -207,53 +252,52 @@ class EndpointExtractor:
                         params=params,
                         source="link",
                     ))
+                else:
+                    # No query params, but a numeric path segment (/users/1/profile) is an
+                    # object reference worth testing for path-based IDOR. Record it with a
+                    # marker param so it reaches the detectors.
+                    seg = _numeric_path_value(absolute_url)
+                    if seg is not None:
+                        endpoints.append(DiscoveredEndpoint(
+                            url=_strip_query(absolute_url),
+                            method="GET",
+                            params={"path_id": seg},
+                            source="path",
+                        ))
 
         except Exception as e:
             logger.debug("Error extracting link params: %s", e)
 
         # ── 3. Extract script-embedded API endpoints ──
+        # The regex runs in Python (easier to get right + unit-testable). Each call-site
+        # that reveals a verb (axios.post, $.delete, http.put …) keeps that method; bare
+        # path and fetch() references default to GET. Previously everything here was
+        # recorded as GET, so a POST/PUT/DELETE API found in JS was mistyped and its
+        # injection tests ran against the wrong method.
         try:
-            script_urls = await self.page.eval_on_selector_all(
-                "script",
-                """scripts => {
-                    const urls = [];
-                    const patterns = [
-                        /['"](\\/api\\/[^'"\\s]+)['"]/g,
-                        /['"](\\/v[0-9]+\\/[^'"\\s]+)['"]/g,
-                        /fetch\\(['"]([^'"]+)['"]/g,
-                        /axios\\.[a-z]+\\(['"]([^'"]+)['"]/g,
-                        /\\.(?:get|post|put|delete|patch)\\(['"]([^'"]+)['"]/g,
-                    ];
-                    scripts.forEach(script => {
-                        const text = script.textContent || '';
-                        patterns.forEach(pattern => {
-                            let match;
-                            const re = new RegExp(pattern.source, pattern.flags);
-                            while ((match = re.exec(text)) !== null) {
-                                if (match[1]) urls.push(match[1]);
-                            }
-                        });
-                    });
-                    return [...new Set(urls)];
-                }""",
+            script_texts = await self.page.eval_on_selector_all(
+                "script", "els => els.map(s => s.textContent || '')"
             )
-
-            for url_path in script_urls:
-                absolute_url = urljoin(current_url, url_path)
-                if self._is_same_domain(absolute_url) or url_path.startswith("/"):
+            seen_script: set[tuple[str, str]] = set()
+            for text in script_texts:
+                for url_path, method in extract_script_calls(text):
+                    absolute_url = urljoin(current_url, url_path)
+                    if not (self._is_same_domain(absolute_url) or url_path.startswith("/")):
+                        continue
                     if url_path.startswith("/"):
                         parsed_base = urlparse(current_url)
                         absolute_url = f"{parsed_base.scheme}://{parsed_base.netloc}{url_path}"
-
-                    params = _parse_query_params(absolute_url)
+                    key = (_strip_query(absolute_url), method)
+                    if key in seen_script:
+                        continue
+                    seen_script.add(key)
                     endpoints.append(DiscoveredEndpoint(
                         url=_strip_query(absolute_url),
-                        method="GET",
-                        params=params,
+                        method=method,
+                        params=_parse_query_params(absolute_url),
                         source="script",
                     ))
-
-            logger.debug("Extracted %d script-embedded API endpoints", len(script_urls))
+            logger.debug("Extracted %d script-embedded API endpoints", len(seen_script))
 
         except Exception as e:
             logger.debug("Error extracting script URLs: %s", e)

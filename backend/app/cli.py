@@ -28,7 +28,7 @@ import tempfile
 from pathlib import Path
 
 _SEVERITY_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
-_DEFAULT_DETECTORS = "xss,sqli,idor,passive"
+_DEFAULT_DETECTORS = "xss,sqli,idor,passive,csrf"
 
 EXIT_CLEAN, EXIT_FINDINGS, EXIT_ERROR = 0, 1, 2
 
@@ -91,6 +91,12 @@ async def _run_scan(args) -> int:
     if not target_url:
         print("error: provide a target URL (positional) or target.base_url in --config",
               file=sys.stderr)
+        return EXIT_ERROR
+    from app.schemas.target import _validate_base_url
+    try:
+        target_url = _validate_base_url(target_url)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
         return EXIT_ERROR
 
     # Isolated database — a throwaway temp file unless --db is given, so the user's

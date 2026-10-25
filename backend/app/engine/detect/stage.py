@@ -16,7 +16,9 @@ from app.engine.detect.xss import XssDetector
 from app.engine.detect.sqli import SqliDetector
 from app.engine.detect.idor import IdorDetector, CrossSessionIdorDetector, AccessControlDetector
 from app.engine.detect.passive import PassiveScanner
+from app.engine.detect.csrf import CsrfScanner
 from app.engine.detect.stored_xss import StoredXssDetector
+from app.engine.detect.stored_sqli import StoredSqliDetector
 from app.models.endpoint import Endpoint
 from app.models.finding import Finding, FindingStatus
 from app.models.evidence import Evidence
@@ -29,7 +31,7 @@ logger = logging.getLogger("proofstrike.detect.stage")
 # Per-probe detectors. (Others run as batch passes: stored XSS under "xss",
 # cross-session/access-control under "idor", and "passive".)
 AVAILABLE = {"xss": XssDetector, "sqli": SqliDetector, "idor": IdorDetector}
-_BATCH_ONLY = {"passive"}  # selected names handled by a batch pass, not a per-probe detector
+_BATCH_ONLY = {"passive", "csrf"}  # selected names handled by a batch pass, not a per-probe detector
 
 
 async def new_request_context(playwright, storage_state):
@@ -71,7 +73,8 @@ class DetectStage:
         if skipped:
             logger.info("Detectors not implemented yet, skipped: %s", skipped)
         run_passive = "passive" in ctx.detectors
-        if not detectors and not run_passive:
+        run_csrf = "csrf" in ctx.detectors
+        if not detectors and not run_passive and not run_csrf:
             logger.info("Detect stage: no implemented detectors selected")
             ctx.stats.setdefault("candidates_found", 0)
             return
@@ -118,6 +121,26 @@ class DetectStage:
                         pairs = []
                     for probe, candidate in pairs:
                         key = (probe.id, candidate.param, candidate.type)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        await self._store(ctx, probe, candidate)
+                        candidates_found += 1
+
+                # Second-order (stored) SQLi: seed writable params, harvest sinks for a
+                # late DB error (cross-endpoint, like stored XSS).
+                if "sqli" in ctx.detectors and not self._stopped():
+                    so_sinks = await self._load_sink_urls(ctx)
+                    try:
+                        pairs = await StoredSqliDetector().detect_all(probes, so_sinks, http)
+                    except Exception as e:
+                        logger.debug("Stored SQLi detector failed: %s", e)
+                        pairs = []
+                    for probe, candidate in pairs:
+                        # Keyed with the technique so a second-order finding is not shadowed
+                        # by a first-order SQLi candidate on the same (endpoint, param): the
+                        # per-probe pass can see this sink's error by following a redirect.
+                        key = (probe.id, candidate.param, candidate.type, candidate.technique)
                         if key in seen:
                             continue
                         seen.add(key)
@@ -177,6 +200,22 @@ class DetectStage:
                         pairs = await PassiveScanner().scan_all(probes, http)
                     except Exception as e:
                         logger.debug("Passive scanner failed: %s", e)
+                        pairs = []
+                    for probe, candidate in pairs:
+                        key = (probe.id, candidate.param, candidate.type)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        await self._store(ctx, probe, candidate)
+                        candidates_found += 1
+
+                # CSRF: state-changing endpoints with no token + no SameSite (sync, uses
+                # the captured session's cookies to know whether SameSite already protects).
+                if run_csrf and not self._stopped():
+                    try:
+                        pairs = CsrfScanner().scan(probes, ctx.storage_state)
+                    except Exception as e:
+                        logger.debug("CSRF scanner failed: %s", e)
                         pairs = []
                     for probe, candidate in pairs:
                         key = (probe.id, candidate.param, candidate.type)
@@ -261,6 +300,13 @@ class DetectStage:
                 f"1. Send the request below with '{candidate.param}' set to the payload.\n"
                 f"2. Open {sink} and observe the payload rendered un-encoded (it was stored).\n\n"
                 f"Payload: {candidate.payload}"
+            )
+        if candidate.type == "csrf":
+            return (
+                "1. From a different origin, auto-submit the request below to a logged-in "
+                "victim (no anti-CSRF token is required).\n"
+                "2. Observe the state change is performed on the victim's behalf.\n\n"
+                f"Request: {candidate.title}"
             )
         if candidate.type == "auth_bypass":
             return (

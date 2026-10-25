@@ -28,7 +28,7 @@ from __future__ import annotations
 import difflib
 import logging
 import re
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 from app.engine.detect.base import Candidate, DetectorHttp, EndpointProbe, build_curl
 
@@ -75,6 +75,21 @@ def _is_reference(name: str, value: str) -> bool:
     if not _INT_RE.match(str(value or "")):
         return False
     return _is_reference_name(name)
+
+
+def path_numeric_segments(url: str) -> list[tuple[int, str]]:
+    """(index, value) for each numeric path segment, e.g. /users/1/profile -> [(2,'1')]."""
+    segs = (urlparse(url).path or "").split("/")
+    return [(i, s) for i, s in enumerate(segs) if s.isdigit()]
+
+
+def with_path_segment(url: str, index: int, value) -> str:
+    """Return url with path segment `index` replaced by `value`."""
+    p = urlparse(url)
+    segs = p.path.split("/")
+    if 0 <= index < len(segs):
+        segs[index] = str(value)
+    return urlunparse((p.scheme, p.netloc, "/".join(segs), p.params, p.query, p.fragment))
 
 
 def _neighbors(value: str) -> list[str]:
