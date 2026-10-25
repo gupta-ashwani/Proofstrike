@@ -4,6 +4,8 @@ ProofStrike — FastAPI application entry point.
 Registers all routers, sets up CORS, and initializes the database on startup.
 """
 
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
@@ -12,13 +14,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
 from app.config import settings
-from app.database import init_db, async_session
+from app.database import init_db, ensure_schema, async_session
 
 # Import models so Base.metadata knows about all tables
 import app.models  # noqa: F401
 from app.models.scan import Scan, ScanStatus
 
+from app.engine.scheduler import run_scheduler
 from app.routers import targets, scans, findings, dashboard, reports, crawler
+from app.routers.crawler import launch_scan
+
+logger = logging.getLogger("proofstrike.main")
 
 
 async def fail_interrupted_scans():
@@ -46,10 +52,30 @@ async def fail_interrupted_scans():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup: create DB tables, recover interrupted scans. Shutdown: cleanup."""
+    """
+    Startup: create/migrate DB tables, recover interrupted scans, and start the
+    continuous-scan scheduler. Shutdown: stop the scheduler cleanly.
+    """
     await init_db()
+    await ensure_schema()
     await fail_interrupted_scans()
-    yield
+
+    # Background scheduler: re-runs scans for targets on a schedule (see
+    # app.engine.scheduler). Runs on this server loop; it only touches the DB and
+    # delegates the actual (Playwright) run to launch_scan's own thread.
+    stop_event = asyncio.Event()
+    scheduler_task = asyncio.create_task(
+        run_scheduler(stop_event, launch_scan), name="proofstrike-scheduler"
+    )
+    try:
+        yield
+    finally:
+        stop_event.set()
+        scheduler_task.cancel()
+        try:
+            await scheduler_task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001 — shutdown best-effort
+            pass
 
 
 app = FastAPI(

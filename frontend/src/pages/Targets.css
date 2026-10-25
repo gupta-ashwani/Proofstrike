@@ -89,6 +89,14 @@
   color: #E57373;
   background: rgba(229, 115, 115, 0.12);
 }
+.btn-icon-active {
+  color: var(--accent-primary);
+  background: var(--accent-primary-dim);
+}
+.btn-icon-active:hover {
+  color: var(--accent-primary-hover);
+  background: var(--accent-primary-dim);
+}
 
 .target-card-meta {
   display: flex;
@@ -114,6 +122,55 @@
 .auth-pill.none {
   background: transparent;
   color: var(--text-muted);
+}
+
+.target-schedule-row {
+  display: flex;
+  align-items: center;
+}
+
+.schedule-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  transition: all var(--transition-fast);
+}
+.schedule-pill.on {
+  background: var(--accent-primary-dim);
+  color: var(--accent-primary);
+  border: 1px solid var(--accent-primary-border);
+}
+.schedule-pill .schedule-next {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.schedule-pill.off {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px dashed var(--border-subtle);
+  cursor: pointer;
+}
+.schedule-pill.off:hover {
+  color: var(--text-primary);
+  border-color: var(--accent-primary-border);
+}
+
+.schedule-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: 14px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.schedule-toggle input {
+  width: auto;
+  margin: 0;
+  cursor: pointer;
 }
 
 .target-card-footer {

@@ -11,9 +11,42 @@ import {
   Shield,
   AlertCircle,
   X,
+  CalendarClock,
+  Repeat,
+  Power,
 } from 'lucide-react';
 import api from '../hooks/useApi';
 import './Targets.css';
+
+// Interval presets offered in the schedule modal (value in minutes).
+const INTERVAL_PRESETS = [
+  { label: 'Every 15 minutes', value: 15 },
+  { label: 'Hourly', value: 60 },
+  { label: 'Every 6 hours', value: 360 },
+  { label: 'Daily', value: 1440 },
+  { label: 'Weekly', value: 10080 },
+];
+
+// Human-readable interval, e.g. 90 -> "1h 30m", 1440 -> "1d".
+function formatInterval(mins) {
+  if (!mins) return '—';
+  const preset = INTERVAL_PRESETS.find((p) => p.value === mins);
+  if (preset) return preset.label;
+  const d = Math.floor(mins / 1440);
+  const h = Math.floor((mins % 1440) / 60);
+  const m = mins % 60;
+  return [d && `${d}d`, h && `${h}h`, m && `${m}m`].filter(Boolean).join(' ');
+}
+
+// Relative time until an ISO timestamp, e.g. "in 42m", "in 3h", "due now".
+function formatCountdown(iso) {
+  if (!iso) return null;
+  const secs = (new Date(iso).getTime() - Date.now()) / 1000;
+  if (secs <= 30) return 'due now';
+  if (secs < 3600) return `in ${Math.round(secs / 60)}m`;
+  if (secs < 86400) return `in ${Math.round(secs / 3600)}h`;
+  return `in ${Math.round(secs / 86400)}d`;
+}
 
 export default function Targets() {
   const [targets, setTargets] = useState([]);
@@ -27,6 +60,14 @@ export default function Targets() {
   const [baseUrl, setBaseUrl] = useState('');
   const [authConfigJson, setAuthConfigJson] = useState('');
   const [saving, setSaving] = useState(false);
+
+  // Schedule modal state
+  const [scheduleTarget, setScheduleTarget] = useState(null);
+  const [scheduleEnabled, setScheduleEnabled] = useState(false);
+  const [intervalMinutes, setIntervalMinutes] = useState(60);
+  const [isCustomInterval, setIsCustomInterval] = useState(false);
+  const [savingSchedule, setSavingSchedule] = useState(false);
+  const [scheduleError, setScheduleError] = useState(null);
 
   const fetchTargets = async () => {
     setLoading(true);
@@ -107,6 +148,48 @@ export default function Targets() {
     }
   };
 
+  const openScheduleModal = (target) => {
+    setScheduleTarget(target);
+    setScheduleEnabled(target.schedule_enabled || false);
+    const mins = target.scan_interval_minutes || 60;
+    setIntervalMinutes(mins);
+    setIsCustomInterval(!INTERVAL_PRESETS.some((p) => p.value === mins));
+    setScheduleError(null);
+  };
+
+  const closeScheduleModal = () => {
+    setScheduleTarget(null);
+    setScheduleError(null);
+  };
+
+  const handleSaveSchedule = async (e) => {
+    e.preventDefault();
+    setSavingSchedule(true);
+    setScheduleError(null);
+
+    if (scheduleEnabled && (!intervalMinutes || intervalMinutes < 5)) {
+      setScheduleError('Interval must be at least 5 minutes.');
+      setSavingSchedule(false);
+      return;
+    }
+
+    try {
+      const updated = await api.put(`/targets/${scheduleTarget.id}/schedule`, {
+        enabled: scheduleEnabled,
+        interval_minutes: scheduleEnabled ? Number(intervalMinutes) : null,
+      });
+      // Reflect the change locally without a full refetch.
+      setTargets((prev) =>
+        prev.map((t) => (t.id === updated.id ? { ...t, ...updated } : t))
+      );
+      closeScheduleModal();
+    } catch (err) {
+      setScheduleError(err.message || 'Failed to update schedule');
+    } finally {
+      setSavingSchedule(false);
+    }
+  };
+
   const handleDelete = async (id, targetName) => {
     if (!window.confirm(`Are you sure you want to remove target "${targetName}" and its scans?`)) {
       return;
@@ -176,6 +259,13 @@ export default function Targets() {
                 </div>
                 <div className="target-actions">
                   <button
+                    className={`btn-icon${target.schedule_enabled ? ' btn-icon-active' : ''}`}
+                    title={target.schedule_enabled ? 'Continuous scan: on' : 'Schedule continuous scans'}
+                    onClick={() => openScheduleModal(target)}
+                  >
+                    <CalendarClock size={15} />
+                  </button>
+                  <button
                     className="btn-icon"
                     title="Edit target"
                     onClick={() => openEditModal(target)}
@@ -207,6 +297,28 @@ export default function Targets() {
                     )}
                   </span>
                 </div>
+              </div>
+
+              <div className="target-schedule-row">
+                {target.schedule_enabled ? (
+                  <span className="schedule-pill on">
+                    <Repeat size={12} />
+                    {formatInterval(target.scan_interval_minutes)}
+                    {target.next_scan_at && (
+                      <span className="schedule-next">
+                        · next {formatCountdown(target.next_scan_at)}
+                      </span>
+                    )}
+                  </span>
+                ) : (
+                  <button
+                    className="schedule-pill off"
+                    onClick={() => openScheduleModal(target)}
+                  >
+                    <CalendarClock size={12} />
+                    Set up continuous scans
+                  </button>
+                )}
               </div>
 
               <div className="target-card-footer">
@@ -297,6 +409,105 @@ export default function Targets() {
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={saving}>
                   {saving ? 'Saving...' : editingTarget ? 'Update Target' : 'Create Target'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Continuous Scan Schedule Modal */}
+      {scheduleTarget && (
+        <div className="modal-overlay" onClick={closeScheduleModal}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="text-subheading">Continuous Scanning</h3>
+              <button className="btn-ghost" onClick={closeScheduleModal}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveSchedule} className="target-form">
+              <p className="text-muted text-caption">
+                Re-run a full scan of <strong>{scheduleTarget.name}</strong> on a fixed
+                interval. Each run can be compared against the previous one to surface
+                only what changed.
+              </p>
+
+              {scheduleError && (
+                <div className="form-error">
+                  <AlertCircle size={15} />
+                  <span>{scheduleError}</span>
+                </div>
+              )}
+
+              <label className="schedule-toggle">
+                <input
+                  type="checkbox"
+                  checked={scheduleEnabled}
+                  onChange={(e) => setScheduleEnabled(e.target.checked)}
+                />
+                <Power size={15} />
+                <span>Enable continuous scanning</span>
+              </label>
+
+              {scheduleEnabled && (
+                <>
+                  <div className="form-group">
+                    <label className="form-label">Scan interval</label>
+                    <select
+                      value={isCustomInterval ? 'custom' : String(intervalMinutes)}
+                      onChange={(e) => {
+                        if (e.target.value === 'custom') {
+                          setIsCustomInterval(true);
+                        } else {
+                          setIsCustomInterval(false);
+                          setIntervalMinutes(Number(e.target.value));
+                        }
+                      }}
+                    >
+                      {INTERVAL_PRESETS.map((p) => (
+                        <option key={p.value} value={String(p.value)}>
+                          {p.label}
+                        </option>
+                      ))}
+                      <option value="custom">Custom…</option>
+                    </select>
+                  </div>
+
+                  {isCustomInterval && (
+                    <div className="form-group">
+                      <label className="form-label">Custom interval (minutes)</label>
+                      <input
+                        type="number"
+                        min={5}
+                        value={intervalMinutes}
+                        onChange={(e) => setIntervalMinutes(e.target.value)}
+                      />
+                      <span className="form-hint">
+                        Minimum 5 minutes. First scan starts shortly after you enable.
+                      </span>
+                    </div>
+                  )}
+
+                  {scheduleTarget.next_scan_at && scheduleTarget.schedule_enabled && (
+                    <span className="form-hint">
+                      Next scheduled run {formatCountdown(scheduleTarget.next_scan_at)}.
+                    </span>
+                  )}
+                </>
+              )}
+
+              <div className="modal-actions">
+                <button type="button" className="btn btn-secondary" onClick={closeScheduleModal}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={savingSchedule}>
+                  {savingSchedule
+                    ? 'Saving…'
+                    : scheduleEnabled
+                    ? 'Save Schedule'
+                    : 'Turn Off Schedule'}
                 </button>
               </div>
             </form>

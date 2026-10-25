@@ -45,6 +45,29 @@ class TargetUpdate(BaseModel):
         return _validate_base_url(v) if v is not None else v
 
 
+# Smallest interval the scheduler accepts, to avoid hammering a target.
+MIN_SCAN_INTERVAL_MINUTES = 5
+
+
+class ScheduleUpdate(BaseModel):
+    """Configure (or turn off) continuous scanning for a target."""
+    enabled: bool
+    # Required when enabling (unless the target already has an interval saved).
+    interval_minutes: int | None = None
+    # Scan.config each scheduled run uses (detectors, crawl limits). Omit to keep
+    # the target's current schedule_config; send null to clear it (engine defaults).
+    config: dict | None = None
+
+    @field_validator("interval_minutes")
+    @classmethod
+    def _check_interval(cls, v):
+        if v is not None and v < MIN_SCAN_INTERVAL_MINUTES:
+            raise ValueError(
+                f"interval_minutes must be at least {MIN_SCAN_INTERVAL_MINUTES}"
+            )
+        return v
+
+
 # ── Response schemas ──
 
 class TargetResponse(BaseModel):
@@ -55,6 +78,13 @@ class TargetResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     scan_count: int = 0
+
+    # Continuous-scan schedule
+    schedule_enabled: bool = False
+    scan_interval_minutes: int | None = None
+    schedule_config: dict | None = None
+    last_scheduled_scan_at: datetime | None = None
+    next_scan_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 

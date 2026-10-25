@@ -82,3 +82,38 @@ async def init_db():
     """Create all tables on startup (dev convenience)."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+
+# Columns added to existing tables after the DB was first created. create_all()
+# only creates missing *tables*, not missing *columns*, and dev has no Alembic
+# migration step — so on startup we ALTER TABLE ADD COLUMN any that a pre-existing
+# proofstrike.db is missing. Keep each DDL additive and give non-null columns a
+# DEFAULT so existing rows migrate cleanly.
+_SCHEMA_ADDITIONS: dict[str, dict[str, str]] = {
+    "targets": {
+        "schedule_enabled": "BOOLEAN NOT NULL DEFAULT 0",
+        "scan_interval_minutes": "INTEGER",
+        "schedule_config": "JSON",
+        "last_scheduled_scan_at": "DATETIME",
+        "next_scan_at": "DATETIME",
+    },
+}
+
+
+def _apply_schema_additions(sync_conn):
+    for table, columns in _SCHEMA_ADDITIONS.items():
+        rows = sync_conn.exec_driver_sql(f"PRAGMA table_info({table})").fetchall()
+        if not rows:
+            continue  # table doesn't exist yet (create_all handles fresh DBs)
+        existing = {r[1] for r in rows}
+        for col, ddl in columns.items():
+            if col not in existing:
+                sync_conn.exec_driver_sql(
+                    f"ALTER TABLE {table} ADD COLUMN {col} {ddl}"
+                )
+
+
+async def ensure_schema():
+    """Add any columns a pre-existing SQLite DB is missing (see _SCHEMA_ADDITIONS)."""
+    async with engine.begin() as conn:
+        await conn.run_sync(_apply_schema_additions)
