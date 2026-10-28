@@ -60,12 +60,41 @@ REMEDIATION = (
 )
 
 
+_CAMEL_RE = re.compile(r"([a-z0-9])([A-Z])")
+_SPLIT_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _name_tokens(name: str) -> set[str]:
+    """
+    Break a parameter name into lowercase word-parts, camelCase/snake/kebab aware,
+    with simple plurals singularised: 'listAccounts' -> {'list', 'accounts', 'account'},
+    'customer_id' -> {'customer', 'id'}.
+
+    Word-part matching (vs a substring scan) is what keeps this precise: a token has
+    to *equal* a reference word, so 'accountant' / 'reorder' / 'number' never match
+    'account' / 'order' / 'no', while real names like 'listAccounts' do.
+    """
+    spaced = _CAMEL_RE.sub(r"\1 \2", name)
+    toks: set[str] = set()
+    for part in _SPLIT_RE.split(spaced.lower()):
+        if not part:
+            continue
+        toks.add(part)
+        if len(part) > 3 and part.endswith("s"):
+            toks.add(part[:-1])  # accounts -> account
+    return toks
+
+
 def _is_reference_name(name: str) -> bool:
     """A parameter name that denotes an object reference (so worth an access-control look)."""
     low = name.lower()
     if low == "id":
         return False  # precision-first default (public catalogues key on bare id)
     if low in _REFERENCE_NAMES:
+        return True
+    # A reference word appears as a distinct word-part of the name — catches
+    # real-world names like listAccounts, accountNumber, customerId, userProfile.
+    if _name_tokens(name) & _REFERENCE_NAMES:
         return True
     return low.endswith("id") or low.endswith("_no")
 

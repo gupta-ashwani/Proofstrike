@@ -20,6 +20,8 @@ from app.engine.crawler.browser import CapturedRequest
 
 logger = logging.getLogger("proofstrike.crawler.extractor")
 
+_INT_RE = re.compile(r"^-?\d+$")
+
 
 @dataclass
 class DiscoveredEndpoint:
@@ -170,6 +172,49 @@ class EndpointExtractor:
         """Check if URL is in the crawl scope."""
         return self.scope.contains(url)
 
+    def _nav_endpoint(self, nav: dict, current_url: str) -> "DiscoveredEndpoint | None":
+        """
+        Build an endpoint from a JS navigation handler (onchange / onclick) when there
+        is no <form> or <a href> to find — e.g. a bare
+        ``<select onchange="location='showAccount?listAccounts='+this.value">``.
+
+        Pulls the first quoted URL/path out of the handler, keeps any concrete query
+        values, and — for a <select> of object ids — seeds the value-less navigation
+        parameter (the ``?key=`` the code concatenates ``this.value`` onto, or the
+        select's own name) with a numeric option so the IDOR detector has a real id.
+        """
+        handler = nav.get("handler") or ""
+        token = None
+        for m in re.finditer(r"""['"]([^'"]+)['"]""", handler):
+            cand = m.group(1).strip()
+            if "?" in cand or cand.startswith("/") or re.search(
+                r"\.(jsp|php|aspx?|do|html?)(\?|$)", cand, re.IGNORECASE
+            ):
+                token = cand
+                break
+        if not token:
+            return None
+
+        absolute = urljoin(current_url, token)
+        if not self._is_same_domain(absolute):
+            return None
+
+        parsed = urlparse(absolute)
+        qs = parse_qs(parsed.query, keep_blank_values=True)
+        params = {k: v[0] for k, v in qs.items() if v and v[0]}  # concrete query values
+
+        numeric_opts = [o for o in nav.get("options", []) if _INT_RE.match(str(o))]
+        if numeric_opts:
+            sel_param = next((k for k, v in qs.items() if not (v and v[0])), None) or nav.get("name")
+            if sel_param:
+                params[sel_param] = numeric_opts[0]
+
+        if not params:
+            return None
+        return DiscoveredEndpoint(
+            url=_strip_query(absolute), method="GET", params=params, source="form",
+        )
+
     async def extract_from_dom(self) -> list[DiscoveredEndpoint]:
         """
         Extract endpoints from the current page's DOM.
@@ -191,8 +236,11 @@ class EndpointExtractor:
                     method: (form.method || 'GET').toUpperCase(),
                     inputs: Array.from(form.querySelectorAll('input, select, textarea')).map(inp => ({
                         name: inp.name || '',
-                        type: inp.type || 'text',
+                        type: inp.type || (inp.tagName ? inp.tagName.toLowerCase() : 'text'),
                         value: inp.value || '',
+                        options: inp.tagName === 'SELECT'
+                            ? Array.from(inp.options).map(o => o.value).filter(v => v !== '')
+                            : [],
                         required: inp.required || false,
                     })).filter(inp => inp.name),
                 }))""",
@@ -213,12 +261,24 @@ class EndpointExtractor:
                 params = {}
                 for inp in inputs:
                     name = inp.get("name", "")
-                    if name:
-                        params[name] = {
-                            "type": inp.get("type", "text"),
-                            "value": inp.get("value", ""),
-                            "required": inp.get("required", False),
-                        }
+                    if not name:
+                        continue
+                    value = inp.get("value", "")
+                    # A dropdown of object identifiers (e.g. <select name="listAccounts">
+                    # with <option value="800000">…) is an IDOR surface, but the default
+                    # .value is often a placeholder. Seed it with a numeric option so the
+                    # detector gets a real starting id to enumerate from.
+                    if not _INT_RE.match(str(value or "")):
+                        numeric_opt = next(
+                            (o for o in inp.get("options", []) if _INT_RE.match(str(o))), None
+                        )
+                        if numeric_opt is not None:
+                            value = numeric_opt
+                    params[name] = {
+                        "type": inp.get("type", "text"),
+                        "value": value,
+                        "required": inp.get("required", False),
+                    }
 
                 endpoints.append(DiscoveredEndpoint(
                     url=_strip_query(absolute_url),
@@ -231,6 +291,33 @@ class EndpointExtractor:
 
         except Exception as e:
             logger.debug("Error extracting forms: %s", e)
+
+        # ── 1b. Extract JS-navigation handlers (onchange / onclick) ──
+        # A dropdown that navigates via JS (no <form>, no <a href>) is invisible to the
+        # form and link passes. Capture selects with an onchange and elements with an
+        # onclick that jump to a URL, so e.g. a formless account-picker still becomes a
+        # testable endpoint.
+        try:
+            navs = await self.page.eval_on_selector_all(
+                "select[onchange], [onclick]",
+                """els => els.map(el => ({
+                    name: el.name || '',
+                    handler: el.getAttribute('onchange') || el.getAttribute('onclick') || '',
+                    options: el.tagName === 'SELECT'
+                        ? Array.from(el.options).map(o => o.value).filter(v => v !== '')
+                        : [],
+                }))""",
+            )
+            nav_count = 0
+            for nav in navs:
+                ep = self._nav_endpoint(nav, current_url)
+                if ep is not None:
+                    endpoints.append(ep)
+                    nav_count += 1
+            logger.debug("Extracted %d JS-navigation endpoints", nav_count)
+
+        except Exception as e:
+            logger.debug("Error extracting JS navigation: %s", e)
 
         # ── 2. Extract links with query params ──
         try:
