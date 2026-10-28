@@ -11,6 +11,7 @@ import {
   RefreshCw,
   ExternalLink,
   Lock,
+  Flag,
 } from 'lucide-react';
 import api from '../hooks/useApi';
 import StatusBadge from '../components/StatusBadge';
@@ -20,12 +21,46 @@ import './ScanDetails.css';
 
 const PHASES = ['queued', 'crawling', 'testing', 'verifying', 'completed'];
 
+// A labelled block of diff rows (new / fixed / unchanged). `bare` drops the header
+// (used inside the collapsible unchanged section).
+function DiffGroup({ title, kind, items, bare = false }) {
+  const sign = kind === 'new' ? '+' : kind === 'fixed' ? '−' : '=';
+  const linkable = kind !== 'fixed'; // fixed findings live on the previous scan
+  return (
+    <div className={`diff-group diff-group-${kind}`}>
+      {!bare && <div className="diff-group-title">{title}</div>}
+      <div className="diff-rows">
+        {items.map((it) => {
+          const row = (
+            <>
+              <span className="diff-sign">{sign}</span>
+              <span className={`diff-type type-${it.type}`}>{it.type}</span>
+              <span className={`diff-sev sev-${it.severity}`}>{it.severity}</span>
+              <span className="diff-title">{it.title}</span>
+            </>
+          );
+          return linkable && it.finding_id ? (
+            <Link key={it.fingerprint} to={`/findings/${it.finding_id}`} className="diff-row linkable">
+              {row}
+            </Link>
+          ) : (
+            <div key={it.fingerprint} className="diff-row">
+              {row}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function ScanDetails() {
   const { id } = useParams();
   const [scan, setScan] = useState(null);
   const [target, setTarget] = useState(null);
   const [endpoints, setEndpoints] = useState([]);
   const [findings, setFindings] = useState([]);
+  const [diff, setDiff] = useState(null);
   const [progress, setProgress] = useState(null);
   const [activeTab, setActiveTab] = useState('endpoints');
   const [loading, setLoading] = useState(true);
@@ -35,18 +70,21 @@ export default function ScanDetails() {
 
   const fetchScanData = async () => {
     try {
-      const [scanData, progressData, endpointsData, findingsData] =
+      const [scanData, progressData, endpointsData, findingsData, diffData] =
         await Promise.all([
           api.get(`/scans/${id}`),
           api.get(`/scans/${id}/progress`).catch(() => null),
           api.get(`/scans/${id}/endpoints`).catch(() => ({ endpoints: [] })),
           api.get(`/scans/${id}/findings`).catch(() => ({ findings: [] })),
+          // 404 until the scan has completed and a diff exists.
+          api.get(`/scans/${id}/diff`).catch(() => null),
         ]);
 
       setScan(scanData);
       setProgress(progressData);
       setEndpoints(endpointsData?.endpoints || []);
       setFindings(findingsData?.findings || []);
+      setDiff(diffData);
 
       if (scanData?.target_id) {
         const targetData = await api.get(`/targets/${scanData.target_id}`).catch(() => null);
@@ -250,6 +288,17 @@ export default function ScanDetails() {
           >
             Findings & Candidates ({findings.length})
           </button>
+          {diff && (
+            <button
+              className={`tab ${activeTab === 'changes' ? 'active' : ''}`}
+              onClick={() => setActiveTab('changes')}
+            >
+              Changes{' '}
+              {diff.is_baseline
+                ? '(baseline)'
+                : `(+${diff.new_count} / -${diff.fixed_count})`}
+            </button>
+          )}
           <button
             className={`tab ${activeTab === 'config' ? 'active' : ''}`}
             onClick={() => setActiveTab('config')}
@@ -329,6 +378,81 @@ export default function ScanDetails() {
                   <FindingCard key={finding.id} finding={finding} />
                 ))}
               </div>
+            )}
+          </div>
+        )}
+
+        {/* Changes (differential) Tab */}
+        {activeTab === 'changes' && diff && (
+          <div className="diff-tab-pane">
+            {diff.is_baseline ? (
+              <div className="card diff-baseline">
+                <Flag size={18} />
+                <div>
+                  <h4 className="text-subheading">Baseline scan</h4>
+                  <p className="text-secondary text-body">
+                    This is the first completed scan for this target, so there is nothing
+                    to compare against yet. It establishes a baseline of{' '}
+                    <strong>{diff.new_count}</strong> confirmed finding
+                    {diff.new_count === 1 ? '' : 's'}. The next scheduled scan will show
+                    only what changed.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="diff-summary-bar">
+                  <div className="diff-stat new">
+                    <span className="diff-n">{diff.new_count}</span>
+                    <span className="diff-l">New</span>
+                  </div>
+                  <div className="diff-stat fixed">
+                    <span className="diff-n">{diff.fixed_count}</span>
+                    <span className="diff-l">Fixed</span>
+                  </div>
+                  <div className="diff-stat unchanged">
+                    <span className="diff-n">{diff.unchanged_count}</span>
+                    <span className="diff-l">Still open</span>
+                  </div>
+                </div>
+
+                {diff.new_count === 0 && diff.fixed_count === 0 ? (
+                  <div className="card diff-nochange">
+                    <CheckCircle2 size={18} />
+                    <span>
+                      No change since the previous scan — {diff.unchanged_count} confirmed
+                      finding{diff.unchanged_count === 1 ? '' : 's'} carried over.
+                    </span>
+                  </div>
+                ) : (
+                  <>
+                    {diff.new.length > 0 && (
+                      <DiffGroup
+                        title="New since last scan"
+                        kind="new"
+                        items={diff.new}
+                      />
+                    )}
+                    {diff.fixed.length > 0 && (
+                      <DiffGroup
+                        title="Fixed / no longer reproducible"
+                        kind="fixed"
+                        items={diff.fixed}
+                      />
+                    )}
+                  </>
+                )}
+
+                {diff.unchanged.length > 0 && (
+                  <details className="diff-unchanged-wrap">
+                    <summary>
+                      {diff.unchanged.length} unchanged finding
+                      {diff.unchanged.length === 1 ? '' : 's'} (still open)
+                    </summary>
+                    <DiffGroup kind="unchanged" items={diff.unchanged} bare />
+                  </details>
+                )}
+              </>
             )}
           </div>
         )}

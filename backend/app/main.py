@@ -21,7 +21,7 @@ import app.models  # noqa: F401
 from app.models.scan import Scan, ScanStatus
 
 from app.engine.scheduler import run_scheduler
-from app.routers import targets, scans, findings, dashboard, reports, crawler
+from app.routers import targets, scans, findings, dashboard, reports, crawler, diff
 from app.routers.crawler import launch_scan
 
 logger = logging.getLogger("proofstrike.main")
@@ -101,6 +101,7 @@ app.include_router(findings.router)
 app.include_router(dashboard.router)
 app.include_router(reports.router)
 app.include_router(crawler.router)
+app.include_router(diff.router)
 
 
 @app.get("/", tags=["Health"])

@@ -76,6 +76,16 @@ class ScanPipeline:
 
         final = ScanStatus.STOPPED.value if self._cancelled else ScanStatus.COMPLETED.value
         await self._finalize(ctx, final, start_time)
+
+        # Differential: compare this run against the target's previous completed scan.
+        # Only meaningful for a completed run; never let a diff error fail the scan.
+        if final == ScanStatus.COMPLETED.value:
+            try:
+                from app.engine.diff import compute_scan_diff
+                await compute_scan_diff(self.session_factory, self.scan_id)
+            except Exception:
+                logger.exception("Diff computation failed for scan %s", self.scan_id[:8])
+
         logger.info("Scan %s finished: %s", self.scan_id[:8], final)
         return ctx.stats
 

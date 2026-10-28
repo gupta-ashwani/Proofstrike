@@ -62,7 +62,7 @@ class VerifyStage:
         idor = await self._load_candidates(ctx, "idor")
         authbypass = await self._load_candidates(ctx, "auth_bypass")
         csrf = await self._load_candidates(ctx, "csrf")
-        passive = {t: await self._load_candidates(ctx, t)
+        passive = {t: await self._load_passive_candidates(ctx, t)
                    for t in ("security_headers", "insecure_cookie", "info_disclosure", "open_redirect")}
         has_passive = any(passive.values())
         # Path-based IDOR is discovered live over HTTP whenever IDOR is enabled.
@@ -390,12 +390,11 @@ class VerifyStage:
     async def _verify_passive(self, ctx: "ScanContext", http, ftype, items):
         """Re-check a passive finding (the param carries the issue key, e.g. header name)."""
         verifier = PassiveVerifier(ftype)
-        for finding_id, endpoint, param in items:
+        for finding_id, probe, param in items:
             if self._stopped():
                 break
-            if ctx.excluder.is_excluded(endpoint.url):
+            if ctx.excluder.is_excluded(probe.url):
                 continue
-            probe = EndpointProbe.from_endpoint(endpoint)
             result = await verifier.verify(http, probe, param)
             await self._record(ctx, finding_id, result)
 
@@ -457,6 +456,41 @@ class VerifyStage:
                 )).scalar_one_or_none()
                 if endpoint:
                     out.append((f.id, endpoint, _param_of(f)))
+        return out
+
+    async def _load_passive_candidates(self, ctx: "ScanContext", ftype: str):
+        """
+        Return (finding_id, probe, param) for each passive candidate of this type.
+
+        Page-level passive findings (missing headers, cookie flags, info disclosure)
+        can be anchored to the base URL, which has no endpoint row — so when
+        endpoint_id is missing, rebuild a bare GET probe from the finding's URL
+        (reconstructed from the base origin + the path carried in the title) rather
+        than dropping the finding unverified.
+        """
+        out = []
+        async with ctx.session_factory() as db:
+            findings = (await db.execute(
+                select(Finding).where(
+                    Finding.scan_id == ctx.scan_id,
+                    Finding.status == FindingStatus.CANDIDATE.value,
+                    Finding.type == ftype,
+                )
+            )).scalars().all()
+            for f in findings:
+                probe = None
+                if f.endpoint_id:
+                    endpoint = (await db.execute(
+                        select(Endpoint).where(Endpoint.id == f.endpoint_id)
+                    )).scalar_one_or_none()
+                    if endpoint:
+                        probe = EndpointProbe.from_endpoint(endpoint)
+                if probe is None:
+                    url = _passive_url(ctx.base_url, f.title)
+                    if not url:
+                        continue
+                    probe = EndpointProbe(id=None, url=url, method="GET", baseline={})
+                out.append((f.id, probe, _param_of(f)))
         return out
 
     async def _load_sqli_candidates_split(self, ctx: "ScanContext"):
@@ -591,3 +625,21 @@ def _param_of(finding: Finding) -> str:
         if len(parts) >= 2:
             return parts[-2]
     return ""
+
+
+def _passive_url(base_url: str, title: str) -> str:
+    """Reconstruct a passive finding's page URL from the base origin + the path the
+    title carries in its trailing '(path)'. Used when the finding has no endpoint row
+    (e.g. a header issue anchored to the base URL)."""
+    import re
+    from urllib.parse import urljoin
+
+    m = re.search(r"\(([^()]*)\)\s*$", title or "")
+    path = (m.group(1).strip() if m else "") or "/"
+    # A stored '(inj -> sink)' form isn't a plain path; fall back to the base URL.
+    if " " in path or "->" in path:
+        return base_url
+    try:
+        return urljoin(base_url, path)
+    except ValueError:
+        return base_url

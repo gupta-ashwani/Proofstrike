@@ -21,7 +21,8 @@ export default function NewScan() {
     xss: true,
     sqli: true,
     idor: true,
-    csrf: false,
+    csrf: true,
+    passive: true,
   });
   const [loadingTargets, setLoadingTargets] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -320,6 +321,21 @@ export default function NewScan() {
                   <div className="detector-name">CSRF & Missing Protection</div>
                   <div className="detector-desc text-caption text-secondary">
                     State-changing request anti-CSRF token verification
+                  </div>
+                </div>
+              </div>
+
+              <div
+                className={`detector-item ${detectors.passive ? 'selected' : ''}`}
+                onClick={() => toggleDetector('passive')}
+              >
+                <div className="detector-check">
+                  {detectors.passive && <Check size={14} />}
+                </div>
+                <div className="detector-info">
+                  <div className="detector-name">Passive Checks</div>
+                  <div className="detector-desc text-caption text-secondary">
+                    Security headers, cookie flags, info disclosure & open redirect
                   </div>
                 </div>
               </div>

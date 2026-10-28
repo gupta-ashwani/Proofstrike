@@ -39,3 +39,27 @@ class ScanProgress(BaseModel):
     endpoints_found: int = 0
     findings_count: int = 0
     elapsed_seconds: float | None = None
+
+
+# ── Differential (scan-to-scan diff) ──
+
+class DiffItem(BaseModel):
+    fingerprint: str
+    type: str
+    severity: str
+    title: str
+    finding_id: str | None = None
+
+
+class ScanDiffResponse(BaseModel):
+    scan_id: str
+    target_id: str
+    previous_scan_id: str | None = None
+    is_baseline: bool = False
+    new_count: int = 0
+    fixed_count: int = 0
+    unchanged_count: int = 0
+    new: list[DiffItem] = []
+    fixed: list[DiffItem] = []
+    unchanged: list[DiffItem] = []
+    created_at: datetime

@@ -194,10 +194,13 @@ class DetectStage:
                         candidates_found += 1
 
                 # Passive checks: security headers, cookie flags, info disclosure,
-                # open redirect — read off normal responses.
+                # open redirect — read off normal responses. These are page-level, so
+                # they run over ALL discovered pages (base URL + every GET page), not
+                # just the injectable endpoints the active detectors use.
                 if run_passive and not self._stopped():
+                    passive_probes = await self._load_passive_probes(ctx, probes)
                     try:
-                        pairs = await PassiveScanner().scan_all(probes, http)
+                        pairs = await PassiveScanner().scan_all(passive_probes, http)
                     except Exception as e:
                         logger.debug("Passive scanner failed: %s", e)
                         pairs = []
@@ -247,6 +250,44 @@ class DetectStage:
                 continue  # nothing to inject
             if ctx.excluder.is_excluded(ep.url):
                 continue
+            probes.append(EndpointProbe.from_endpoint(ep))
+        return probes
+
+    async def _load_passive_probes(
+        self, ctx: "ScanContext", injectable: list[EndpointProbe]
+    ) -> list[EndpointProbe]:
+        """
+        Pages for the passive scanner: the base URL + every discovered GET page, plus
+        the injectable probes (so open-redirect still covers param endpoints). Header /
+        cookie / info-disclosure checks are page-level and must not be limited to
+        endpoints that happen to carry a parameter — otherwise a site's landing and
+        authenticated pages (often param-less) are never header-checked.
+        """
+        probes: list[EndpointProbe] = []
+        seen_urls: set[str] = set()
+
+        # Base URL first, so a shared issue (e.g. missing CSP) attaches to the root page.
+        if ctx.base_url and not ctx.excluder.is_excluded(ctx.base_url):
+            probes.append(EndpointProbe(id=None, url=ctx.base_url, method="GET", baseline={}))
+            seen_urls.add(ctx.base_url)
+
+        # Injectable probes keep open-redirect coverage (they carry params).
+        for p in injectable:
+            if p.url not in seen_urls:
+                probes.append(p)
+                seen_urls.add(p.url)
+
+        # Every other GET page (including param-less ones the active pass skips).
+        async with ctx.session_factory() as db:
+            rows = (await db.execute(
+                select(Endpoint).where(Endpoint.scan_id == ctx.scan_id)
+            )).scalars().all()
+        for ep in rows:
+            if (ep.method or "GET").upper() != "GET":
+                continue
+            if ep.url in seen_urls or ctx.excluder.is_excluded(ep.url):
+                continue
+            seen_urls.add(ep.url)
             probes.append(EndpointProbe.from_endpoint(ep))
         return probes
 
