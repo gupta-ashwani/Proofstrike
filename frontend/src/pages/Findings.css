@@ -1,107 +1,51 @@
-.findings-page {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-xl);
-}
+.findings-page { display: flex; flex-direction: column; gap: var(--space-xl); }
 
 .filter-card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-lg);
-  padding: var(--space-xl);
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--space-lg); padding: var(--space-md) var(--space-lg); flex-wrap: wrap;
 }
 
-.search-box {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-
-.search-icon {
-  position: absolute;
-  left: var(--space-md);
-  color: var(--text-muted);
-}
-
-.search-box input {
-  padding-left: 38px;
-  background: var(--bg-elevated);
-}
-
+.search-box { position: relative; flex: 1; min-width: 220px; max-width: 420px; }
+.search-box input { padding-left: 38px; }
+.search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-muted); pointer-events: none; }
 .clear-search {
-  position: absolute;
-  right: var(--space-md);
-  background: transparent;
-  color: var(--text-muted);
-  display: flex;
-  align-items: center;
+  position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+  background: transparent; color: var(--text-muted); display: flex;
 }
-.clear-search:hover { color: var(--text-secondary); }
+.clear-search:hover { color: var(--text-primary); }
 
-.filter-dropdowns {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-md);
-  align-items: center;
-}
+.filter-dropdowns { display: flex; align-items: center; gap: var(--space-sm); flex-wrap: wrap; }
+.filter-select { width: auto; min-width: 150px; }
 
-.filter-select {
-  width: auto;
-  min-width: 160px;
-  background: var(--bg-elevated);
-  font-size: 13px;
-}
+.scans-error { border-left: 3px solid var(--sev-critical); color: var(--text-primary); padding: var(--space-md) var(--space-lg); }
 
-.table-card {
-  padding: 0;
-  overflow: hidden;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-}
+.table-card { padding: 0; overflow: hidden; }
+.table-card .table-wrapper { border: none; border-radius: 0; }
 
 .type-tag {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  padding: 2px 6px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  color: var(--text-muted);
+  font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: var(--radius-full);
+  background: var(--bg-elevated); color: var(--text-secondary);
 }
-
-.finding-table-title { font-weight: 500; color: var(--text-primary); }
-.finding-table-title:hover { color: var(--accent-primary); }
+.finding-title-link { color: var(--text-primary); font-size: 13px; }
+.finding-title-link:hover { color: var(--accent-primary); }
 
 .status-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  text-transform: capitalize;
-  color: var(--text-muted);
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: var(--radius-full);
+  text-transform: capitalize; white-space: nowrap;
 }
-.status-pill.pill-confirmed { color: var(--accent-primary); }
+.pill-confirmed { background: rgba(76, 175, 80, 0.14); color: #5bbf60; }
+.pill-candidate { background: var(--accent-primary-dim); color: var(--accent-primary); }
+.pill-rejected, .pill-false_positive { background: var(--bg-elevated); color: var(--text-muted); }
 
-.inspect-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--accent-primary);
-  padding: 4px 8px;
-  border-radius: var(--radius-sm);
-  background: var(--accent-primary-dim);
-  border: 1px solid var(--accent-primary-border);
-  transition: all var(--transition-fast);
-}
-.inspect-btn:hover {
-  background: var(--accent-primary);
-  border-color: var(--accent-primary);
-  color: #FFFFFF;
+.scan-open { display: inline-flex; align-items: center; justify-content: center; color: var(--text-muted); padding: 4px; border-radius: var(--radius-sm); }
+.finding-tr:hover .scan-open { color: var(--accent-primary); }
+
+.empty-row td { padding: 0; }
+.empty-row:hover { background: transparent; }
+
+@media (max-width: 767px) {
+  .filter-card { flex-direction: column; align-items: stretch; }
+  .search-box { max-width: none; }
+  thead th:nth-child(5), .finding-tr td:nth-child(5) { display: none; }
 }

@@ -29,13 +29,14 @@ export default function Layout({ children }) {
   // Helper to determine page title for top bar
   const getPageTitle = () => {
     const path = location.pathname;
-    if (path === '/') return 'Dashboard Overview';
-    if (path === '/targets') return 'Target Applications';
-    if (path === '/scans') return 'Scan Management';
-    if (path === '/scans/new') return 'Configure New Scan';
-    if (path.startsWith('/scans/')) return 'Scan Details & Live Telemetry';
-    if (path === '/findings') return 'Vulnerability Findings';
-    if (path.startsWith('/findings/')) return 'Finding Investigation';
+    if (path === '/') return 'Overview';
+    if (path === '/targets') return 'Targets';
+    if (path.startsWith('/targets/')) return 'Target';
+    if (path === '/scans') return 'Scans';
+    if (path === '/scans/new') return 'New Scan';
+    if (path.startsWith('/scans/')) return 'Scan Detail';
+    if (path === '/findings') return 'Findings';
+    if (path.startsWith('/findings/')) return 'Finding';
     return 'ProofStrike';
   };
 

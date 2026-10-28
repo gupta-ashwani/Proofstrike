@@ -8,51 +8,17 @@ import {
   Download,
   AlertCircle,
   CheckCircle2,
-  RefreshCw,
   ExternalLink,
   Lock,
-  Flag,
+  ArrowLeft,
 } from 'lucide-react';
 import api from '../hooks/useApi';
 import StatusBadge from '../components/StatusBadge';
-import SeverityBadge from '../components/SeverityBadge';
 import FindingCard from '../components/FindingCard';
+import DiffView from '../components/DiffView';
 import './ScanDetails.css';
 
 const PHASES = ['queued', 'crawling', 'testing', 'verifying', 'completed'];
-
-// A labelled block of diff rows (new / fixed / unchanged). `bare` drops the header
-// (used inside the collapsible unchanged section).
-function DiffGroup({ title, kind, items, bare = false }) {
-  const sign = kind === 'new' ? '+' : kind === 'fixed' ? '−' : '=';
-  const linkable = kind !== 'fixed'; // fixed findings live on the previous scan
-  return (
-    <div className={`diff-group diff-group-${kind}`}>
-      {!bare && <div className="diff-group-title">{title}</div>}
-      <div className="diff-rows">
-        {items.map((it) => {
-          const row = (
-            <>
-              <span className="diff-sign">{sign}</span>
-              <span className={`diff-type type-${it.type}`}>{it.type}</span>
-              <span className={`diff-sev sev-${it.severity}`}>{it.severity}</span>
-              <span className="diff-title">{it.title}</span>
-            </>
-          );
-          return linkable && it.finding_id ? (
-            <Link key={it.fingerprint} to={`/findings/${it.finding_id}`} className="diff-row linkable">
-              {row}
-            </Link>
-          ) : (
-            <div key={it.fingerprint} className="diff-row">
-              {row}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
 
 export default function ScanDetails() {
   const { id } = useParams();
@@ -159,6 +125,12 @@ export default function ScanDetails() {
 
   return (
     <div className="scan-details-page animate-slide-up">
+      <div className="back-bar">
+        <Link to={`/targets/${scan.target_id}`} className="back-link">
+          <ArrowLeft size={15} /><span>{target?.name || 'Target'}</span>
+        </Link>
+      </div>
+
       {/* Header Banner */}
       <div className="scan-details-header card">
         <div className="header-left">
@@ -167,7 +139,9 @@ export default function ScanDetails() {
             <StatusBadge status={scan.status} size="lg" />
           </div>
           <h2 className="scan-target-title">
-            {target?.name || 'Target Scope'}{' '}
+            <Link to={`/targets/${scan.target_id}`} className="scan-target-link">
+              {target?.name || 'Target Scope'}
+            </Link>{' '}
             {target?.base_url && (
               <a
                 href={target.base_url}
@@ -384,76 +358,8 @@ export default function ScanDetails() {
 
         {/* Changes (differential) Tab */}
         {activeTab === 'changes' && diff && (
-          <div className="diff-tab-pane">
-            {diff.is_baseline ? (
-              <div className="card diff-baseline">
-                <Flag size={18} />
-                <div>
-                  <h4 className="text-subheading">Baseline scan</h4>
-                  <p className="text-secondary text-body">
-                    This is the first completed scan for this target, so there is nothing
-                    to compare against yet. It establishes a baseline of{' '}
-                    <strong>{diff.new_count}</strong> confirmed finding
-                    {diff.new_count === 1 ? '' : 's'}. The next scheduled scan will show
-                    only what changed.
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <>
-                <div className="diff-summary-bar">
-                  <div className="diff-stat new">
-                    <span className="diff-n">{diff.new_count}</span>
-                    <span className="diff-l">New</span>
-                  </div>
-                  <div className="diff-stat fixed">
-                    <span className="diff-n">{diff.fixed_count}</span>
-                    <span className="diff-l">Fixed</span>
-                  </div>
-                  <div className="diff-stat unchanged">
-                    <span className="diff-n">{diff.unchanged_count}</span>
-                    <span className="diff-l">Still open</span>
-                  </div>
-                </div>
-
-                {diff.new_count === 0 && diff.fixed_count === 0 ? (
-                  <div className="card diff-nochange">
-                    <CheckCircle2 size={18} />
-                    <span>
-                      No change since the previous scan — {diff.unchanged_count} confirmed
-                      finding{diff.unchanged_count === 1 ? '' : 's'} carried over.
-                    </span>
-                  </div>
-                ) : (
-                  <>
-                    {diff.new.length > 0 && (
-                      <DiffGroup
-                        title="New since last scan"
-                        kind="new"
-                        items={diff.new}
-                      />
-                    )}
-                    {diff.fixed.length > 0 && (
-                      <DiffGroup
-                        title="Fixed / no longer reproducible"
-                        kind="fixed"
-                        items={diff.fixed}
-                      />
-                    )}
-                  </>
-                )}
-
-                {diff.unchanged.length > 0 && (
-                  <details className="diff-unchanged-wrap">
-                    <summary>
-                      {diff.unchanged.length} unchanged finding
-                      {diff.unchanged.length === 1 ? '' : 's'} (still open)
-                    </summary>
-                    <DiffGroup kind="unchanged" items={diff.unchanged} bare />
-                  </details>
-                )}
-              </>
-            )}
+          <div className="card">
+            <DiffView diff={diff} />
           </div>
         )}
 

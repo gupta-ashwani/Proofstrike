@@ -1,0 +1,16 @@
+.schedule-form { display: flex; flex-direction: column; gap: var(--space-lg); }
+
+.schedule-toggle {
+  display: flex; align-items: center; gap: var(--space-sm);
+  font-size: 14px; color: var(--text-primary); cursor: pointer;
+}
+.schedule-toggle input { width: auto; margin: 0; cursor: pointer; }
+
+.form-error {
+  display: flex; align-items: center; gap: 6px;
+  color: #E57373; font-size: 13px;
+  background: rgba(229, 115, 115, 0.1);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(229, 115, 115, 0.25);
+}
